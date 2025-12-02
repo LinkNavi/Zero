@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/kirby/Programming/Zero/ZeroEngine/.build/debug/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
