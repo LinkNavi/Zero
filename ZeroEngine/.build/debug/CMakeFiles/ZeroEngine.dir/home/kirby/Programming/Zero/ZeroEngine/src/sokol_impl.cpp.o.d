@@ -1,4 +1,4 @@
-CMakeFiles/Zero.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o: \
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o: \
  /home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp \
  /usr/include/stdc-predef.h \
  /home/kirby/Programming/Zero/ZeroEngine/.build/debug/../../include/sokol/sokol_app.h \

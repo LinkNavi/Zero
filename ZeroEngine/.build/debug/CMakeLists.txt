@@ -1,6 +1,6 @@
 
 cmake_minimum_required(VERSION 3.10)
-project(Zero CXX)
+project(ZeroEngine CXX)
 
 
 
@@ -17,18 +17,20 @@ file(GLOB_RECURSE SOURCES
 
 
 
-add_executable(Zero ${SOURCES})
+add_executable(ZeroEngine ${SOURCES})
 
 
 
-target_include_directories(Zero PRIVATE "${PROJECT_SOURCE_DIR}/../../include")
+target_include_directories(ZeroEngine PRIVATE "${PROJECT_SOURCE_DIR}/../../include")
+
+target_include_directories(ZeroEngine PRIVATE "${PROJECT_SOURCE_DIR}/../../include/sokol")
 
 
 
 
 
 # Custom build flags
-target_compile_options(Zero PRIVATE 
+target_compile_options(ZeroEngine PRIVATE 
 
     "-Wall"
 
@@ -41,6 +43,23 @@ target_compile_options(Zero PRIVATE
 
 
 
+
+# Additional libraries
+target_link_libraries(ZeroEngine PRIVATE 
+
+    GL
+
+    X11
+
+    Xi
+
+    Xcursor
+
+    dl
+
+    pthread
+
+)
 
 
 

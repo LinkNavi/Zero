@@ -117,24 +117,48 @@ depend:
 .PHONY : depend
 
 #=============================================================================
-# Target rules for targets named Zero
+# Target rules for targets named ZeroEngine
 
 # Build rule for target.
-Zero: cmake_check_build_system
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 Zero
-.PHONY : Zero
+ZeroEngine: cmake_check_build_system
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/Makefile2 ZeroEngine
+.PHONY : ZeroEngine
 
 # fast build rule for target.
-Zero/fast:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Zero.dir/build.make CMakeFiles/Zero.dir/build
-.PHONY : Zero/fast
+ZeroEngine/fast:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/build
+.PHONY : ZeroEngine/fast
+
+home/kirby/Programming/Zero/ZeroEngine/src/Renderer.o: home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Renderer.o
+
+# target to build an object file
+home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o
+
+home/kirby/Programming/Zero/ZeroEngine/src/Renderer.i: home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.i
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Renderer.i
+
+# target to preprocess a source file
+home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.i
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.i
+
+home/kirby/Programming/Zero/ZeroEngine/src/Renderer.s: home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Renderer.s
+
+# target to generate assembly for a file
+home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s
 
 home/kirby/Programming/Zero/ZeroEngine/src/main.o: home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o
 .PHONY : home/kirby/Programming/Zero/ZeroEngine/src/main.o
 
 # target to build an object file
 home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Zero.dir/build.make CMakeFiles/Zero.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o
 .PHONY : home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o
 
 home/kirby/Programming/Zero/ZeroEngine/src/main.i: home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.i
@@ -142,7 +166,7 @@ home/kirby/Programming/Zero/ZeroEngine/src/main.i: home/kirby/Programming/Zero/Z
 
 # target to preprocess a source file
 home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Zero.dir/build.make CMakeFiles/Zero.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.i
 .PHONY : home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.i
 
 home/kirby/Programming/Zero/ZeroEngine/src/main.s: home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s
@@ -150,7 +174,7 @@ home/kirby/Programming/Zero/ZeroEngine/src/main.s: home/kirby/Programming/Zero/Z
 
 # target to generate assembly for a file
 home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Zero.dir/build.make CMakeFiles/Zero.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s
 .PHONY : home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s
 
 home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.o: home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o
@@ -158,7 +182,7 @@ home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.o: home/kirby/Programming/
 
 # target to build an object file
 home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Zero.dir/build.make CMakeFiles/Zero.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o
 .PHONY : home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o
 
 home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.i: home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.i
@@ -166,7 +190,7 @@ home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.i: home/kirby/Programming/
 
 # target to preprocess a source file
 home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Zero.dir/build.make CMakeFiles/Zero.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.i
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.i
 .PHONY : home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.i
 
 home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.s: home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.s
@@ -174,7 +198,7 @@ home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.s: home/kirby/Programming/
 
 # target to generate assembly for a file
 home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/Zero.dir/build.make CMakeFiles/Zero.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.s
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.s
 .PHONY : home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.s
 
 # Help Target
@@ -185,7 +209,10 @@ help:
 	@echo "... depend"
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
-	@echo "... Zero"
+	@echo "... ZeroEngine"
+	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Renderer.o"
+	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Renderer.i"
+	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Renderer.s"
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/main.o"
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/main.i"
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/main.s"

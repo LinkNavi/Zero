@@ -1,4 +1,4 @@
-name = "Zero"
+name = "ZeroEngine"
 version = "0.1.0"
 type = "exec"
 language = "cpp"
@@ -7,11 +7,12 @@ language = "cpp"
 dirs = ["src"]
 
 [includes]
-dirs = ["include"]
+dirs = ["include", "include/sokol"]
 
 [build]
 flags = ["-Wall", "-Wextra", "-Wpedantic"]
 optimization = "2"
+libs = ["GL", "X11", "Xi", "Xcursor", "dl", "pthread"]
 
 [deps]
 
@@ -19,5 +20,3 @@ optimization = "2"
 # Custom build scripts can be defined here
 # prebuild = "echo 'Running prebuild'"
 # postbuild = "echo 'Build complete'"
-
-
