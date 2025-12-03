@@ -16,6 +16,7 @@ CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o:
  /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/include/stdbool.h \
  /home/kirby/Programming/Zero/ZeroEngine/.build/debug/../../include/sokol/sokol_gfx.h \
  /home/kirby/Programming/Zero/ZeroEngine/.build/debug/../../include/sokol/sokol_glue.h \
+ /home/kirby/Programming/Zero/ZeroEngine/.build/debug/../../include/sokol/sokol_log.h \
  /home/kirby/Programming/Zero/ZeroEngine/.build/debug/../../include/Renderer.h \
  /home/kirby/Programming/Zero/ZeroEngine/.build/debug/../../include/sokol/sokol_app.h \
  /home/kirby/Programming/Zero/ZeroEngine/.build/debug/../../include/sokol/sokol_gfx.h \

@@ -67,6 +67,10 @@ CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cp
  /usr/include/c++/15.2.1/cstddef \
  /usr/include/c++/15.2.1/bits/uses_allocator.h \
  /usr/include/c++/15.2.1/bits/uses_allocator_args.h \
- /usr/include/c++/15.2.1/tuple /usr/include/c++/15.2.1/cstring \
- /usr/include/string.h /usr/include/bits/types/locale_t.h \
- /usr/include/bits/types/__locale_t.h /usr/include/strings.h
+ /usr/include/c++/15.2.1/tuple \
+ /home/kirby/Programming/Zero/ZeroEngine/.build/debug/../../include/sokol/sokol_app.h \
+ /home/kirby/Programming/Zero/ZeroEngine/.build/debug/../../include/sokol/sokol_glue.h \
+ /home/kirby/Programming/Zero/ZeroEngine/.build/debug/../../include/sokol/sokol_log.h \
+ /usr/include/c++/15.2.1/cstring /usr/include/string.h \
+ /usr/include/bits/types/locale_t.h /usr/include/bits/types/__locale_t.h \
+ /usr/include/strings.h

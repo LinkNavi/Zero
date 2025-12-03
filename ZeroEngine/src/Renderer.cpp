@@ -1,4 +1,7 @@
 #include "Renderer.h"
+#include "sokol/sokol_app.h"
+#include "sokol/sokol_glue.h"
+#include "sokol/sokol_log.h"
 #include <cstring>
 
 Renderer::~Renderer() {
@@ -10,6 +13,8 @@ Renderer::~Renderer() {
 void Renderer::Init() {
     sg_desc desc = {};
     desc.environment = sglue_environment();
+    desc.logger.func = slog_func;
+    
     sg_setup(&desc);
     
     mPassAction.colors[0].load_action = SG_LOADACTION_CLEAR;
@@ -54,6 +59,7 @@ sg_buffer Renderer::CreateVertexBuffer(const Vertex* vertices, size_t count) {
 
 sg_buffer Renderer::CreateIndexBuffer(const uint16_t* indices, size_t count) {
     sg_buffer_desc desc = {};
+    desc.usage.index_buffer = true;
     desc.data.ptr = indices;
     desc.data.size = count * sizeof(uint16_t);
     return sg_make_buffer(&desc);
@@ -201,6 +207,7 @@ sg_pipeline Renderer::CreateDefaultColorPipeline() {
     desc.shader = GetDefaultColorShader();
     desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
     desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT4;
+    desc.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT2;
     desc.index_type = SG_INDEXTYPE_UINT16;
     desc.cull_mode = SG_CULLMODE_BACK;
     desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
