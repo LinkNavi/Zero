@@ -9,6 +9,7 @@ set(CMAKE_DEPENDS_LANGUAGES
 # The set of dependency files which are needed:
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp" "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o" "gcc" "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o.d"
+  "/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp" "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o" "gcc" "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o.d"
   )
 
 # Targets to which this target links which contain Fortran sources.

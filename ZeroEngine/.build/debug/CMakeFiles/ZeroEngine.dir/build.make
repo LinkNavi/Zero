@@ -86,17 +86,33 @@ CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/R
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp -o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s
 
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o: CMakeFiles/ZeroEngine.dir/flags.make
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o: /home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o: CMakeFiles/ZeroEngine.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o -MF CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o.d -o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o -c /home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp
+
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp > CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.i
+
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp -o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.s
+
 # Object files for target ZeroEngine
 ZeroEngine_OBJECTS = \
-"CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o"
+"CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o" \
+"CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o"
 
 # External object files for target ZeroEngine
 ZeroEngine_EXTERNAL_OBJECTS =
 
 libZeroEngine.a: CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o
+libZeroEngine.a: CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o
 libZeroEngine.a: CMakeFiles/ZeroEngine.dir/build.make
 libZeroEngine.a: CMakeFiles/ZeroEngine.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Linking CXX static library libZeroEngine.a"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX static library libZeroEngine.a"
 	$(CMAKE_COMMAND) -P CMakeFiles/ZeroEngine.dir/cmake_clean_target.cmake
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/ZeroEngine.dir/link.txt --verbose=$(VERBOSE)
 

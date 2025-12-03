@@ -2,7 +2,7 @@
 #include <string>
 #include <memory>
 #include <unordered_map>
-#include <wren.hpp>
+#include <wren.h>
 
 // Forward declarations
 class ScriptInstance;

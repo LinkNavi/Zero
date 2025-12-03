@@ -4,7 +4,7 @@
 #include "Systems.h"
 #include "ResourceManager.h"
 #include "Serialization.h"
-#include "ScriptingSystem.h"
+#include "ScriptSystem.h"
 #include "Logger.h"
 #include <memory>
 #include <string>

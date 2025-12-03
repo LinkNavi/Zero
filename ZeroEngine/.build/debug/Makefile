@@ -153,6 +153,30 @@ home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s
 .PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s
 
+home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.o: home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.o
+
+# target to build an object file
+home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o
+
+home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.i: home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.i
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.i
+
+# target to preprocess a source file
+home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.i
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.i
+
+home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.s: home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.s
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.s
+
+# target to generate assembly for a file
+home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.s
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.s
+
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -165,6 +189,9 @@ help:
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.o"
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.i"
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.s"
+	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.o"
+	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.i"
+	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.s"
 .PHONY : help
 
 
