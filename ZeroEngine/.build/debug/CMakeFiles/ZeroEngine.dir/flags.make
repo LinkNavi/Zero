@@ -6,5 +6,5 @@ CXX_DEFINES =
 
 CXX_INCLUDES = -I/home/kirby/Programming/Zero/ZeroEngine/.build/debug/../../include
 
-CXX_FLAGS = -g -Wall -Wextra -Wpedantic -std=c++17
+CXX_FLAGS = -g -Wall -Wextra -Wpedantic
 

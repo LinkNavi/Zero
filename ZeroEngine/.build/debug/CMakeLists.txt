@@ -17,7 +17,7 @@ file(GLOB_RECURSE SOURCES
 
 
 
-add_executable(ZeroEngine ${SOURCES})
+add_library(ZeroEngine ${SOURCES})
 
 
 
@@ -36,28 +36,11 @@ target_compile_options(ZeroEngine PRIVATE
 
     "-Wpedantic"
 
-    "-std=c++17"
-
 )
 
 
 
 
-
-# Additional libraries
-target_link_libraries(ZeroEngine PRIVATE 
-
-    glfw
-
-    vulkan
-
-    dl
-
-    pthread
-
-    raylib
-
-)
 
 
 

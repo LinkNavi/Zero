@@ -1,6 +1,6 @@
 name = "ZeroEngine"
 version = "0.1.0"
-type = "exec"
+type = "lib"
 language = "cpp"
 
 [sources]
@@ -10,53 +10,14 @@ dirs = ["src"]
 dirs = ["include"]
 
 [build]
-flags = ["-Wall", "-Wextra", "-Wpedantic", "-std=c++17"]
+flags = ["-Wall", "-Wextra", "-Wpedantic"]
 optimization = "2"
-libs = ["glfw", "vulkan", "dl", "pthread", "raylib"]
+
+[deps]
 
 [scripts]
-# Automatically compile shaders before building
-prebuild = """
-#!/bin/bash
-echo "==================================="
-echo "Building ZeroEngine Shaders..."
-echo "==================================="
+# Custom build scripts can be defined here
+# prebuild = "echo 'Running prebuild'"
+# postbuild = "echo 'Build complete'"
 
-# Create shaders directory if it doesn't exist
-mkdir -p shaders/compiled
 
-# Check if glslc is installed
-if ! command -v glslc &> /dev/null; then
-    echo "ERROR: glslc not found!"
-    echo "Please install the Vulkan SDK from: https://vulkan.lunarg.com/"
-    exit 1
-fi
-
-# Compile vertex shader
-echo "Compiling vertex shader..."
-glslc shaders/shader.vert -o shaders/compiled/vert.spv
-if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to compile vertex shader"
-    exit 1
-fi
-
-# Compile fragment shader
-echo "Compiling fragment shader..."
-glslc shaders/shader.frag -o shaders/compiled/frag.spv
-if [ $? -ne 0 ]; then
-    echo "ERROR: Failed to compile fragment shader"
-    exit 1
-fi
-
-echo "✓ Shaders compiled successfully!"
-echo "==================================="
-"""
-
-postbuild = """
-echo ""
-echo "==================================="
-echo "Build Complete!"
-echo "==================================="
-echo "Run with: ./build/ZeroEngine"
-echo ""
-"""

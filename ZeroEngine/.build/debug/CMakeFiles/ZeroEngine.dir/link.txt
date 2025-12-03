@@ -1,1 +1,2 @@
-/usr/bin/c++ -g -Wl,--dependency-file=CMakeFiles/ZeroEngine.dir/link.d CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o -o ZeroEngine  -lglfw -lvulkan -ldl -lpthread -lraylib
+/usr/bin/ar qc libZeroEngine.a CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o
+/usr/bin/ranlib libZeroEngine.a

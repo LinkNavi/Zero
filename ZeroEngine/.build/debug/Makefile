@@ -153,30 +153,6 @@ home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s
 .PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s
 
-home/kirby/Programming/Zero/ZeroEngine/src/main.o: home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/main.o
-
-# target to build an object file
-home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o
-
-home/kirby/Programming/Zero/ZeroEngine/src/main.i: home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.i
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/main.i
-
-# target to preprocess a source file
-home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.i
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.i
-
-home/kirby/Programming/Zero/ZeroEngine/src/main.s: home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/main.s
-
-# target to generate assembly for a file
-home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s
-
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -189,9 +165,6 @@ help:
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.o"
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.i"
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.s"
-	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/main.o"
-	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/main.i"
-	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/main.s"
 .PHONY : help
 
 
