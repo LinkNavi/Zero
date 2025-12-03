@@ -1,141 +1,234 @@
 #pragma once
 #include "ECS.h"
 #include "Renderer.h"
-#include "ResourceManager.h"
 #include "Systems.h"
+#include "ResourceManager.h"
+#include "Serialization.h"
+#include "Logger.h"
 #include <memory>
+#include <string>
 
 class World {
 public:
-  ECS ecs;
-  Renderer renderer;
-  ResourceManager resources;
+    ECS ecs;
+    Renderer renderer;
+    ResourceManager resources;
 
-  std::shared_ptr<RotationSystem> rotationSystem;
-  std::shared_ptr<InputSystem> inputSystem;
-  std::shared_ptr<PhysicsSystem> physicsSystem;
-  std::shared_ptr<CameraSystem> cameraSystem;
-  std::shared_ptr<RenderSystem> renderSystem;
-  std::shared_ptr<DebugSystem> debugSystem;
+    // Systems
+    std::shared_ptr<RotationSystem> rotationSystem;
+    std::shared_ptr<InputSystem> inputSystem;
+    std::shared_ptr<PhysicsSystem> physicsSystem;
+    std::shared_ptr<CameraSystem> cameraSystem;
+    std::shared_ptr<RenderSystem> renderSystem;
+    std::shared_ptr<LifetimeSystem> lifetimeSystem;
+    std::shared_ptr<DebugSystem> debugSystem;
 
-  Shader defaultShader{};
-  std::shared_ptr<ZeroMesh> sharedCube;
+    Shader defaultShader{};
+    std::shared_ptr<ZeroMesh> sharedCube;
 
-  void Init(int width, int height, const char *title) {
-    renderer.Init(width, height, title);
-    ecs.Init();
+    bool isPaused = false;
 
-    // Register components used by systems
-    ecs.RegisterComponent<MyTransform>();
-    ecs.RegisterComponent<MeshRendererComponent>();
-    ecs.RegisterComponent<Velocity>();
-    ecs.RegisterComponent<InputReceiver>();
-    ecs.RegisterComponent<CameraFollow>();
+    void Init(int width, int height, const char* title) {
+        LOG_INFO("Initializing World...");
 
-    // Register systems and wire ECS + renderer
-    rotationSystem = ecs.RegisterSystem<RotationSystem>();
-    rotationSystem->ecs = &ecs;
+        if (!renderer.Init(width, height, title)) {
+            LOG_FATAL("Failed to initialize renderer");
+            return;
+        }
 
-    inputSystem = ecs.RegisterSystem<InputSystem>();
-    inputSystem->ecs = &ecs;
+        ecs.Init();
 
-    inputSystem = ecs.RegisterSystem<InputSystem>();
-    inputSystem->ecs = &ecs;
+        // Register all components
+        RegisterComponents();
 
-    // Load input bindings from JSON at runtime
+        // Register all systems
+        RegisterSystems();
 
-    if (!inputSystem->bindings.LoadFromFile("input_bindings.json")) {
-      std::cerr << "[Warning] Failed to load input_bindings.json, using "
-                   "default WASD keys.\n";
+        // Load shared resources
+        sharedCube = resources.GetCube(1.0f);
+        defaultShader = resources.GetDefaultShader();
 
-      inputSystem->bindings.actions = {
-          {"MoveForward", {{"KEY_W", "KEY_UP"}}},
-          {"MoveBackward", {{"KEY_S", "KEY_DOWN"}}},
-          {"MoveLeft", {{"KEY_A", "KEY_LEFT"}}},
-          {"MoveRight", {{"KEY_D", "KEY_RIGHT"}}},
-          {"Jump", {{"KEY_SPACE"}}},
-          {"Crouch", {{"KEY_LEFT_SHIFT"}}}};
+        LOG_INFO("World initialization complete");
     }
 
-    physicsSystem = ecs.RegisterSystem<PhysicsSystem>();
-    physicsSystem->ecs = &ecs;
-
-    cameraSystem = ecs.RegisterSystem<CameraSystem>();
-    cameraSystem->ecs = &ecs;
-    cameraSystem->renderer = &renderer;
-
-    renderSystem = ecs.RegisterSystem<RenderSystem>();
-    renderSystem->ecs = &ecs;
-    renderSystem->renderer = &renderer;
-
-    debugSystem = ecs.RegisterSystem<DebugSystem>();
-    debugSystem->ecs = &ecs;
-
-    // Shared resources
-    sharedCube = resources.GetCube(1.0f);
-    defaultShader = resources.GetDefaultShader();
-  }
-
-  // Create a cube entity that is controllable by input
-
-  Entity CreatePlayerCube(float size = 1.0f, bool giveInput = true) {
-    Entity e = ecs.CreateEntity();
-
-    MyTransform t;
-    t.position = {0, 0, 0};
-    t.scale = {size, size, size};
-
-    MeshRendererComponent mr;
-    mr.mesh = sharedCube;
-    mr.shader = defaultShader;
-    mr.isValid = (sharedCube != nullptr);
-
-    Velocity vel;
-    vel.v = {0, 0, 0};
-
-    ecs.AddComponent(e, t);
-    ecs.AddComponent(e, mr);
-    ecs.AddComponent(e, vel);
-
-    if (giveInput) {
-      InputReceiver in;
-      in.speed = 50.0f; // << bump speed for visibility
-      ecs.AddComponent(e, in);
+    void RegisterComponents() {
+        LOG_DEBUG("Registering components...");
+        
+        ecs.RegisterComponent<MyTransform>();
+        ecs.RegisterComponent<MeshRendererComponent>();
+        ecs.RegisterComponent<Velocity>();
+        ecs.RegisterComponent<InputReceiver>();
+        ecs.RegisterComponent<CameraFollow>();
+        ecs.RegisterComponent<Lifetime>();
+        ecs.RegisterComponent<Tag>();
     }
 
-    ecs.UpdateSystemEntities<RotationSystem, MyTransform>(e);
-    ecs.UpdateSystemEntities<InputSystem, InputReceiver, Velocity>(e);
-    ecs.UpdateSystemEntities<PhysicsSystem, MyTransform, Velocity>(e);
-    ecs.UpdateSystemEntities<RenderSystem, MyTransform, MeshRendererComponent>(
-        e);
+    void RegisterSystems() {
+        LOG_DEBUG("Registering systems...");
 
-    return e;
-  }
+        // Input System
+        inputSystem = ecs.RegisterSystem<InputSystem>();
+        inputSystem->ecs = &ecs;
+        ecs.SetSystemSignature<InputSystem, InputReceiver, Velocity>();
 
-  // Create a camera entity to follow a target
+        // Physics System
+        physicsSystem = ecs.RegisterSystem<PhysicsSystem>();
+        physicsSystem->ecs = &ecs;
+        ecs.SetSystemSignature<PhysicsSystem, ZeroTransform, Velocity>();
 
-  Entity CreateCameraEntity(Entity target, Vector3 offset = {0, 5, 10}) {
-    Entity e = ecs.CreateEntity();
-    CameraFollow cf;
-    cf.target = target;
-    cf.offset = offset; // smaller offset for better visibility
-    ecs.AddComponent(e, cf);
-    ecs.UpdateSystemEntities<CameraSystem, CameraFollow>(e);
-    return e;
-  }
+        // Camera System
+        cameraSystem = ecs.RegisterSystem<CameraSystem>();
+        cameraSystem->ecs = &ecs;
+        cameraSystem->renderer = &renderer;
+        ecs.SetSystemSignature<CameraSystem, CameraFollow>();
 
-  // Update world (runs systems)
-  void Update(float dt) {
-    // Order: input -> physics -> camera -> render -> debug
-    inputSystem->Update(dt);
-    physicsSystem->Update(dt);
-    cameraSystem->Update(dt);
-    renderSystem->Update(dt);
-    debugSystem->Update(dt);
-  }
+        // Render System
+        renderSystem = ecs.RegisterSystem<RenderSystem>();
+        renderSystem->ecs = &ecs;
+        renderSystem->renderer = &renderer;
+        ecs.SetSystemSignature<RenderSystem, MyTransform, MeshRendererComponent>();
 
-  void Shutdown() {
-    resources.Shutdown();
-    renderer.Shutdown();
-  }
+        // Lifetime System
+        lifetimeSystem = ecs.RegisterSystem<LifetimeSystem>();
+        lifetimeSystem->ecs = &ecs;
+        ecs.SetSystemSignature<LifetimeSystem, Lifetime>();
+
+        // Rotation System (optional)
+        rotationSystem = ecs.RegisterSystem<RotationSystem>();
+        rotationSystem->ecs = &ecs;
+        ecs.SetSystemSignature<RotationSystem, MyTransform>();
+
+        // Debug System
+        debugSystem = ecs.RegisterSystem<DebugSystem>();
+        debugSystem->ecs = &ecs;
+        ecs.SetSystemSignature<DebugSystem>();
+    }
+
+    // Factory methods for common entities
+    
+    Entity CreatePlayerCube(Vector3 position = {0,0,0}, float size = 1.0f, bool giveInput = true) {
+        Entity e = ecs.CreateEntity();
+
+        MyTransform t;
+        t.position = position;
+        t.scale = {size, size, size};
+        ecs.AddComponent(e, t);
+
+        MeshRendererComponent mr;
+        mr.mesh = sharedCube;
+        mr.shader = defaultShader;
+        mr.isValid = (sharedCube != nullptr);
+        mr.tint = BLUE;
+        ecs.AddComponent(e, mr);
+
+        Velocity vel;
+        ecs.AddComponent(e, vel);
+
+        if (giveInput) {
+            InputReceiver input;
+            input.speed = 50.0f;
+            ecs.AddComponent(e, input);
+        }
+
+        Tag tag;
+        tag.name = "Player";
+        ecs.AddComponent(e, tag);
+
+        LOG_INFO("Created player cube entity: " + std::to_string(e));
+        return e;
+    }
+
+    Entity CreateCube(Vector3 position, Vector3 scale = {1,1,1}, Color color = WHITE) {
+        Entity e = ecs.CreateEntity();
+
+        MyTransform t;
+        t.position = position;
+        t.scale = scale;
+        ecs.AddComponent(e, t);
+
+        MeshRendererComponent mr;
+        mr.mesh = sharedCube;
+        mr.shader = defaultShader;
+        mr.isValid = (sharedCube != nullptr);
+        mr.tint = color;
+        ecs.AddComponent(e, mr);
+
+        Tag tag;
+        tag.name = "Cube";
+        ecs.AddComponent(e, tag);
+
+        return e;
+    }
+
+    Entity CreateCameraEntity(Entity target, Vector3 offset = {0,5,10}) {
+        Entity e = ecs.CreateEntity();
+        
+        CameraFollow cf;
+        cf.target = target;
+        cf.offset = offset;
+        cf.smoothing = 5.0f;
+        ecs.AddComponent(e, cf);
+
+        Tag tag;
+        tag.name = "Camera";
+        ecs.AddComponent(e, tag);
+
+        LOG_INFO("Created camera entity: " + std::to_string(e) + " following entity: " + std::to_string(target));
+        return e;
+    }
+
+    // Scene management
+    bool SaveScene(const std::string& filepath) {
+        LOG_INFO("Saving scene to: " + filepath);
+        return SceneSerializer::SaveScene(filepath, ecs);
+    }
+
+    bool LoadScene(const std::string& filepath) {
+        LOG_INFO("Loading scene from: " + filepath);
+        return SceneSerializer::LoadScene(filepath, ecs, resources);
+    }
+
+    // Update loop
+    void Update(float dt) {
+        if (isPaused) return;
+
+        // System update order matters!
+        inputSystem->Update(dt);
+        physicsSystem->Update(dt);
+        lifetimeSystem->Update(dt);
+        cameraSystem->Update(dt);
+    }
+
+    void Render() {
+        renderSystem->Update(0.0f);
+        debugSystem->Update(0.0f);
+    }
+
+    void HandleInput() {
+        // Save/Load with F5/F9
+        if (IsKeyPressed(KEY_F5)) {
+            SaveScene("autosave.json");
+        }
+        if (IsKeyPressed(KEY_F9)) {
+            LoadScene("autosave.json");
+        }
+
+        // Pause with P
+        if (IsKeyPressed(KEY_P)) {
+            isPaused = !isPaused;
+            LOG_INFO(isPaused ? "Game paused" : "Game resumed");
+        }
+
+        // Quit with ESC
+        if (IsKeyPressed(KEY_ESCAPE)) {
+            LOG_INFO("ESC pressed - quitting");
+        }
+    }
+
+    void Shutdown() {
+        LOG_INFO("Shutting down world...");
+        resources.Shutdown();
+        renderer.Shutdown();
+        LOG_INFO("World shutdown complete");
+    }
 };

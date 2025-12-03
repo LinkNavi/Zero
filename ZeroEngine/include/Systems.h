@@ -2,51 +2,59 @@
 #include "ECS.h"
 #include "Renderer.h"
 #include "Objects.h"
+#include "Logger.h"
 #include <raylib.h>
 #include <memory>
-#include "iostream"
-// Keep compatibility with older code that used MyTransform name
+#include <cmath>
+
+// Components
 struct ZeroTransform {
     Vector3 position{0,0,0};
     Vector3 rotation{0,0,0};
     Vector3 scale{1,1,1};
 };
-using MyTransform = ZeroTransform; // alias so older code still works
+using MyTransform = ZeroTransform;
 
-// Renderable component: holds shared_ptr to avoid heavy copying
 struct MeshRendererComponent {
-    std::shared_ptr<ZeroMesh> mesh; // shared ownership
+    std::shared_ptr<ZeroMesh> mesh;
     Shader shader{};
     bool isValid = false;
+    Color tint = WHITE;
 };
 
-// Movement/Physics
 struct Velocity {
     Vector3 v{0,0,0};
 };
 
-// Input receiver marker + speed multiplier
 struct InputReceiver {
-    float speed = 50.0f; // units per second
+    float speed = 50.0f;
+    bool enabled = true;
 };
 
-// Camera follow
 struct CameraFollow {
-    Entity target = 0;   // entity to follow
+    Entity target = 0;
     Vector3 offset{0,3,10};
+    float smoothing = 5.0f; // Smoothing factor
+};
+
+struct Lifetime {
+    float timeLeft = 5.0f; // Time until entity is destroyed
+};
+
+struct Tag {
+    std::string name = "Entity";
 };
 
 // ------------------- Systems -------------------
 
-// RotationSystem - keep as an example (keeps previous functionality)
 class RotationSystem : public System {
 public:
     ECS* ecs = nullptr;
 
     void Update(float dt) override {
-        (void)dt;
         for (auto e : mEntities) {
             if (!ecs->HasComponent<MyTransform>(e)) continue;
+            
             auto& t = ecs->GetComponent<MyTransform>(e);
             t.rotation.x += 30.0f * dt;
             t.rotation.y += 20.0f * dt;
@@ -54,21 +62,19 @@ public:
     }
 };
 
-// InputSystem - reads keyboard into Velocity for entities that want input
 class InputSystem : public System {
 public:
     ECS* ecs = nullptr;
 
     void Update(float dt) override {
-        (void)dt;
         for (auto e : mEntities) {
             if (!ecs->HasComponent<InputReceiver>(e) ||
                 !ecs->HasComponent<Velocity>(e)) continue;
 
             auto& input = ecs->GetComponent<InputReceiver>(e);
-            auto& vel = ecs->GetComponent<Velocity>(e);
+            if (!input.enabled) continue;
 
-            // zero out
+            auto& vel = ecs->GetComponent<Velocity>(e);
             vel.v = {0,0,0};
 
             // WASD / Arrow controls
@@ -77,26 +83,20 @@ public:
             if (IsKeyDown(KEY_UP)    || IsKeyDown(KEY_W)) vel.v.z -= 1.0f;
             if (IsKeyDown(KEY_DOWN)  || IsKeyDown(KEY_S)) vel.v.z += 1.0f;
 
-            // Normalize (if diagonal) and scale by speed
+            // Normalize diagonal movement
             float len = sqrtf(vel.v.x*vel.v.x + vel.v.z*vel.v.z);
             if (len > 0.0001f) {
                 vel.v.x = (vel.v.x / len) * input.speed;
                 vel.v.z = (vel.v.z / len) * input.speed;
             }
 
-            // vertical control (optional)
+            // Vertical control
             if (IsKeyDown(KEY_SPACE)) vel.v.y += input.speed;
             if (IsKeyDown(KEY_LEFT_SHIFT)) vel.v.y -= input.speed;
         }
-
-for (auto e : mEntities) {
-    std::cout << "Entity in InputSystem: " << e << "\n";
-
-}
     }
 };
 
-// PhysicsSystem - integrate velocity into Transform
 class PhysicsSystem : public System {
 public:
     ECS* ecs = nullptr;
@@ -116,38 +116,42 @@ public:
     }
 };
 
-// CameraSystem - sets renderer camera to follow the entity
 class CameraSystem : public System {
 public:
     ECS* ecs = nullptr;
     Renderer* renderer = nullptr;
 
     void Update(float dt) override {
-        (void)dt;
         if (!renderer) return;
 
-        // Find any entity with CameraFollow - assume only one for now
         for (auto e : mEntities) {
             if (!ecs->HasComponent<CameraFollow>(e)) continue;
+            
             auto& camFollow = ecs->GetComponent<CameraFollow>(e);
 
-            // require the target to have a transform
             if (!ecs->HasComponent<MyTransform>(camFollow.target)) continue;
 
             auto& t = ecs->GetComponent<MyTransform>(camFollow.target);
 
-            // Set underlying raylib camera directly
-            // renderer exposes a Camera variable so we can change it in-place
+            // Smooth camera following
+            Vector3 targetPos = {
+                t.position.x + camFollow.offset.x,
+                t.position.y + camFollow.offset.y,
+                t.position.z + camFollow.offset.z
+            };
+
+            // Lerp camera position for smooth following
+            float smoothFactor = 1.0f - expf(-camFollow.smoothing * dt);
+            
+            renderer->camera.position.x += (targetPos.x - renderer->camera.position.x) * smoothFactor;
+            renderer->camera.position.y += (targetPos.y - renderer->camera.position.y) * smoothFactor;
+            renderer->camera.position.z += (targetPos.z - renderer->camera.position.z) * smoothFactor;
+
             renderer->camera.target = t.position;
-            renderer->camera.position = Vector3{t.position.x + camFollow.offset.x,
-                                               t.position.y + camFollow.offset.y,
-                                               t.position.z + camFollow.offset.z};
-            // Up, fovy left as-is
         }
     }
 };
 
-// RenderSystem - draws scenes using renderer
 class RenderSystem : public System {
 public:
     ECS* ecs = nullptr;
@@ -158,34 +162,73 @@ public:
         if (!renderer) return;
 
         renderer->Begin3D();
+        
+        // Draw grid
+        DrawGrid(20, 1.0f);
+
         for (auto e : mEntities) {
             if (!ecs->HasComponent<MyTransform>(e) ||
                 !ecs->HasComponent<MeshRendererComponent>(e)) continue;
 
             auto& t = ecs->GetComponent<MyTransform>(e);
             auto& mr = ecs->GetComponent<MeshRendererComponent>(e);
+            
             if (!mr.isValid || !mr.mesh) continue;
 
-            // dereference shared ptr
-            renderer->DrawMesh(*mr.mesh, t.position, t.rotation, t.scale, WHITE);
+            renderer->DrawMesh(*mr.mesh, t.position, t.rotation, t.scale, mr.tint);
         }
+        
         renderer->End3D();
     }
 };
 
-// DebugSystem - draws FPS and entity counts
-class DebugSystem : public System {
+class LifetimeSystem : public System {
 public:
     ECS* ecs = nullptr;
+    std::vector<Entity> toDestroy;
 
     void Update(float dt) override {
-        (void)dt;
-        int fps = GetFPS();
-      
-auto living = ecs->GetEntityCount();
-        // Draw as overlay (use raylib immediate mode)
-        DrawText(TextFormat("FPS: %d", fps), 10, 10, 20, BLACK);
-        DrawText(TextFormat("Entities: %zu", ecs->GetEntityCount()), 10, 34, 20, BLACK);
+        toDestroy.clear();
+
+        for (auto e : mEntities) {
+            if (!ecs->HasComponent<Lifetime>(e)) continue;
+
+            auto& lifetime = ecs->GetComponent<Lifetime>(e);
+            lifetime.timeLeft -= dt;
+
+            if (lifetime.timeLeft <= 0.0f) {
+                toDestroy.push_back(e);
+            }
+        }
+
+        // Destroy entities after iteration
+        for (auto e : toDestroy) {
+            LOG_DEBUG("Destroying entity " + std::to_string(e) + " due to lifetime expiration");
+            ecs->DestroyEntity(e);
+        }
     }
 };
 
+class DebugSystem : public System {
+public:
+    ECS* ecs = nullptr;
+    bool showDebugInfo = true;
+
+    void Update(float dt) override {
+        (void)dt;
+        
+        if (!showDebugInfo) return;
+
+        int fps = GetFPS();
+        uint32_t entityCount = ecs->GetEntityCount();
+        
+        DrawText(TextFormat("FPS: %d", fps), 10, 10, 20, GREEN);
+        DrawText(TextFormat("Entities: %d", entityCount), 10, 35, 20, GREEN);
+        DrawText(TextFormat("Delta: %.3f", dt), 10, 60, 20, GREEN);
+
+        // Toggle debug info with F3
+        if (IsKeyPressed(KEY_F3)) {
+            showDebugInfo = !showDebugInfo;
+        }
+    }
+};
