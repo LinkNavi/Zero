@@ -4,6 +4,7 @@
 #include "Systems.h"
 #include "ResourceManager.h"
 #include "Serialization.h"
+#include "ScriptingSystem.h"
 #include "Logger.h"
 #include <memory>
 #include <string>
@@ -15,6 +16,7 @@ public:
     ResourceManager resources;
 
     // Systems
+    std::shared_ptr<ScriptSystem> scriptSystem;
     std::shared_ptr<RotationSystem> rotationSystem;
     std::shared_ptr<InputSystem> inputSystem;
     std::shared_ptr<PhysicsSystem> physicsSystem;
@@ -61,10 +63,17 @@ public:
         ecs.RegisterComponent<CameraFollow>();
         ecs.RegisterComponent<Lifetime>();
         ecs.RegisterComponent<Tag>();
+        ecs.RegisterComponent<ScriptComponent>();  // NEW: Script component
     }
 
     void RegisterSystems() {
         LOG_DEBUG("Registering systems...");
+
+        // Script System - NEW: Initialize first so scripts can override behavior
+        scriptSystem = ecs.RegisterSystem<ScriptSystem>();
+        scriptSystem->ecs = &ecs;
+        scriptSystem->OnInit();
+        ecs.SetSystemSignature<ScriptSystem, ScriptComponent>();
 
         // Input System
         inputSystem = ecs.RegisterSystem<InputSystem>();
@@ -138,6 +147,57 @@ public:
         return e;
     }
 
+    // NEW: Create scripted entity
+    Entity CreateScriptedCube(Vector3 position, const std::string& scriptPath, 
+                              const std::string& className, Color color = WHITE) {
+        Entity e = ecs.CreateEntity();
+
+        MyTransform t;
+        t.position = position;
+        t.scale = {1, 1, 1};
+        ecs.AddComponent(e, t);
+
+        MeshRendererComponent mr;
+        mr.mesh = sharedCube;
+        mr.shader = defaultShader;
+        mr.isValid = (sharedCube != nullptr);
+        mr.tint = color;
+        ecs.AddComponent(e, mr);
+
+        Velocity vel;
+        ecs.AddComponent(e, vel);
+
+        ScriptComponent script;
+        script.scriptPath = scriptPath;
+        script.className = className;
+        ecs.AddComponent(e, script);
+
+        Tag tag;
+        tag.name = className;
+        ecs.AddComponent(e, tag);
+
+        LOG_INFO("Created scripted entity: " + className + " at (" + 
+                 std::to_string(position.x) + ", " + 
+                 std::to_string(position.y) + ", " + 
+                 std::to_string(position.z) + ")");
+        return e;
+    }
+
+    // NEW: Attach script to existing entity
+    void AttachScript(Entity entity, const std::string& scriptPath, const std::string& className) {
+        if (entity == INVALID_ENTITY) {
+            LOG_ERROR("Cannot attach script to invalid entity");
+            return;
+        }
+
+        ScriptComponent script;
+        script.scriptPath = scriptPath;
+        script.className = className;
+        ecs.AddComponent(entity, script);
+
+        LOG_INFO("Attached script " + className + " to entity " + std::to_string(entity));
+    }
+
     Entity CreateCube(Vector3 position, Vector3 scale = {1,1,1}, Color color = WHITE) {
         Entity e = ecs.CreateEntity();
 
@@ -193,6 +253,7 @@ public:
         if (isPaused) return;
 
         // System update order matters!
+        scriptSystem->Update(dt);      // NEW: Scripts run first
         inputSystem->Update(dt);
         physicsSystem->Update(dt);
         lifetimeSystem->Update(dt);
@@ -227,6 +288,7 @@ public:
 
     void Shutdown() {
         LOG_INFO("Shutting down world...");
+        scriptSystem->OnShutdown();
         resources.Shutdown();
         renderer.Shutdown();
         LOG_INFO("World shutdown complete");
