@@ -13,6 +13,9 @@ file(GLOB_RECURSE SOURCES
     "${PROJECT_SOURCE_DIR}/../../src/*.c"
     "${PROJECT_SOURCE_DIR}/../../src/*.cpp"
 
+    "${PROJECT_SOURCE_DIR}/../../src/glad.c/*.c"
+    "${PROJECT_SOURCE_DIR}/../../src/glad.c/*.cpp"
+
 )
 
 
@@ -54,6 +57,8 @@ target_link_libraries(ZeroEngine PRIVATE
     dl
 
     pthread
+
+    vulkan
 
 )
 

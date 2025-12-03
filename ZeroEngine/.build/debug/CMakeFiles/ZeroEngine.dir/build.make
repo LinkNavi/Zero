@@ -86,10 +86,24 @@ CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cp
 	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp -o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s
 
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.o: CMakeFiles/ZeroEngine.dir/flags.make
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.o: /home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.o: CMakeFiles/ZeroEngine.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.o -MF CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.o.d -o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.o -c /home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp
+
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp > CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.i
+
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp -o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.s
+
 CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o: CMakeFiles/ZeroEngine.dir/flags.make
 CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o: /home/kirby/Programming/Zero/ZeroEngine/src/main.cpp
 CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o: CMakeFiles/ZeroEngine.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles --progress-num=$(CMAKE_PROGRESS_2) "Building CXX object CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Building CXX object CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o"
 	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o -MF CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o.d -o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o -c /home/kirby/Programming/Zero/ZeroEngine/src/main.cpp
 
 CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.i: cmake_force
@@ -103,17 +117,19 @@ CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s:
 # Object files for target ZeroEngine
 ZeroEngine_OBJECTS = \
 "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o" \
+"CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.o" \
 "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o"
 
 # External object files for target ZeroEngine
 ZeroEngine_EXTERNAL_OBJECTS =
 
 ZeroEngine: CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o
+ZeroEngine: CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/glad.cpp.o
 ZeroEngine: CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o
 ZeroEngine: CMakeFiles/ZeroEngine.dir/build.make
 ZeroEngine: CMakeFiles/ZeroEngine.dir/compiler_depend.ts
 ZeroEngine: CMakeFiles/ZeroEngine.dir/link.txt
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles --progress-num=$(CMAKE_PROGRESS_3) "Linking CXX executable ZeroEngine"
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --bold --progress-dir=/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles --progress-num=$(CMAKE_PROGRESS_4) "Linking CXX executable ZeroEngine"
 	$(CMAKE_COMMAND) -E cmake_link_script CMakeFiles/ZeroEngine.dir/link.txt --verbose=$(VERBOSE)
 
 # Rule to build all files generated by this target.

@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -Wl,--dependency-file=CMakeFiles/Zero.dir/link.d CMakeFiles/Zero.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o CMakeFiles/Zero.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o -o Zero

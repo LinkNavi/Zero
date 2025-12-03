@@ -201,15 +201,6 @@ ZeroEngine_IS_TOP_LEVEL:STATIC=ON
 //Value Computed by CMake
 ZeroEngine_SOURCE_DIR:STATIC=/home/kirby/Programming/Zero/ZeroEngine/.build/debug
 
-//Value Computed by CMake
-Zero_BINARY_DIR:STATIC=/home/kirby/Programming/Zero/ZeroEngine/.build/debug
-
-//Value Computed by CMake
-Zero_IS_TOP_LEVEL:STATIC=ON
-
-//Value Computed by CMake
-Zero_SOURCE_DIR:STATIC=/home/kirby/Programming/Zero/ZeroEngine/.build/debug
-
 
 ########################
 # INTERNAL cache entries
