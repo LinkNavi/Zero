@@ -72,19 +72,19 @@ include CMakeFiles/ZeroEngine.dir/flags.make
 CMakeFiles/ZeroEngine.dir/codegen:
 .PHONY : CMakeFiles/ZeroEngine.dir/codegen
 
-CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o: CMakeFiles/ZeroEngine.dir/flags.make
-CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o: /home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp
-CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o: CMakeFiles/ZeroEngine.dir/compiler_depend.ts
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o -MF CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o.d -o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o -c /home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o: CMakeFiles/ZeroEngine.dir/flags.make
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o: /home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o: CMakeFiles/ZeroEngine.dir/compiler_depend.ts
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green --progress-dir=/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles --progress-num=$(CMAKE_PROGRESS_1) "Building CXX object CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -MD -MT CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o -MF CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o.d -o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o -c /home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp
 
-CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.i: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.i"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp > CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.i
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.i: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Preprocessing CXX source to CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.i"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -E /home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp > CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.i
 
-CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s: cmake_force
-	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s"
-	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp -o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s
+CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s: cmake_force
+	@$(CMAKE_COMMAND) -E cmake_echo_color "--switch=$(COLOR)" --green "Compiling CXX source to assembly CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s"
+	/usr/bin/c++ $(CXX_DEFINES) $(CXX_INCLUDES) $(CXX_FLAGS) -S /home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp -o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s
 
 CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o: CMakeFiles/ZeroEngine.dir/flags.make
 CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o: /home/kirby/Programming/Zero/ZeroEngine/src/main.cpp
@@ -102,13 +102,13 @@ CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s:
 
 # Object files for target ZeroEngine
 ZeroEngine_OBJECTS = \
-"CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o" \
+"CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o" \
 "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o"
 
 # External object files for target ZeroEngine
 ZeroEngine_EXTERNAL_OBJECTS =
 
-ZeroEngine: CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o
+ZeroEngine: CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o
 ZeroEngine: CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o
 ZeroEngine: CMakeFiles/ZeroEngine.dir/build.make
 ZeroEngine: CMakeFiles/ZeroEngine.dir/compiler_depend.ts

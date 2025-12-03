@@ -129,29 +129,29 @@ ZeroEngine/fast:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/build
 .PHONY : ZeroEngine/fast
 
-home/kirby/Programming/Zero/ZeroEngine/src/Renderer.o: home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Renderer.o
+home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.o: home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.o
 
 # target to build an object file
-home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o
+home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o
 
-home/kirby/Programming/Zero/ZeroEngine/src/Renderer.i: home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.i
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Renderer.i
+home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.i: home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.i
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.i
 
 # target to preprocess a source file
-home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.i
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.i
+home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.i:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.i
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.i
 
-home/kirby/Programming/Zero/ZeroEngine/src/Renderer.s: home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Renderer.s
+home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.s: home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.s
 
 # target to generate assembly for a file
-home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.s
+home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s:
+	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s
+.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.s
 
 home/kirby/Programming/Zero/ZeroEngine/src/main.o: home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o
 .PHONY : home/kirby/Programming/Zero/ZeroEngine/src/main.o
@@ -186,9 +186,9 @@ help:
 	@echo "... edit_cache"
 	@echo "... rebuild_cache"
 	@echo "... ZeroEngine"
-	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Renderer.o"
-	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Renderer.i"
-	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Renderer.s"
+	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.o"
+	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.i"
+	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.s"
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/main.o"
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/main.i"
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/main.s"

@@ -12,7 +12,7 @@ dirs = ["include"]
 [build]
 flags = ["-Wall", "-Wextra", "-Wpedantic", "-std=c++17"]
 optimization = "2"
-libs = ["glfw", "vulkan", "dl", "pthread"]
+libs = ["glfw", "vulkan", "dl", "pthread", "raylib"]
 
 [scripts]
 # Automatically compile shaders before building

@@ -55,6 +55,8 @@ target_link_libraries(ZeroEngine PRIVATE
 
     pthread
 
+    raylib
+
 )
 
 
