@@ -83,6 +83,8 @@ public:
     Mesh CreateMesh(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
     void DestroyMesh(Mesh& mesh);
     
+// near other members
+bool isInitialized = false;
     // Shader/Pipeline management
     Shader CreateDefaultShader();
     void DestroyShader(Shader shader);
