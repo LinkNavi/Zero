@@ -4,11 +4,8 @@ ZeroEngine: \
   /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/crtbeginS.o \
   CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o \
   CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o \
-  CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o \
   /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libGL.so \
-  /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libX11.so \
-  /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libXi.so \
-  /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libXcursor.so \
+  /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libglfw.so \
   /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libdl.a \
   /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libpthread.a \
   /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libstdc++.so \
@@ -39,11 +36,9 @@ ZeroEngine: \
   /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/crtn.o \
   /usr/lib/libGLdispatch.so.0 \
   /usr/lib/libGLX.so.0 \
-  /usr/lib/libxcb.so.1 \
-  /usr/lib/libXext.so.6 \
-  /usr/lib/libXrender.so.1 \
-  /usr/lib/libXfixes.so.3 \
   /usr/lib/ld-linux-x86-64.so.2 \
+  /usr/lib/libX11.so.6 \
+  /usr/lib/libxcb.so.1 \
   /usr/lib/libXau.so.6 \
   /usr/lib/libXdmcp.so.6
 
@@ -57,15 +52,9 @@ CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cp
 
 CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o:
 
-CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o:
-
 /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libGL.so:
 
-/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libX11.so:
-
-/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libXi.so:
-
-/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libXcursor.so:
+/usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libglfw.so:
 
 /usr/lib/gcc/x86_64-pc-linux-gnu/15.2.1/../../../../lib/libdl.a:
 
@@ -127,15 +116,11 @@ CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.
 
 /usr/lib/libGLX.so.0:
 
-/usr/lib/libxcb.so.1:
-
-/usr/lib/libXext.so.6:
-
-/usr/lib/libXrender.so.1:
-
-/usr/lib/libXfixes.so.3:
-
 /usr/lib/ld-linux-x86-64.so.2:
+
+/usr/lib/libX11.so.6:
+
+/usr/lib/libxcb.so.1:
 
 /usr/lib/libXau.so.6:
 

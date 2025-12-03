@@ -177,30 +177,6 @@ home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s:
 	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s
 .PHONY : home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.s
 
-home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.o: home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.o
-
-# target to build an object file
-home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o
-
-home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.i: home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.i
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.i
-
-# target to preprocess a source file
-home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.i:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.i
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.i
-
-home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.s: home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.s
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.s
-
-# target to generate assembly for a file
-home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.s:
-	$(MAKE) $(MAKESILENT) -f CMakeFiles/ZeroEngine.dir/build.make CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.s
-.PHONY : home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.s
-
 # Help Target
 help:
 	@echo "The following are some of the valid targets for this Makefile:"
@@ -216,9 +192,6 @@ help:
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/main.o"
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/main.i"
 	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/main.s"
-	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.o"
-	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.i"
-	@echo "... home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.s"
 .PHONY : help
 
 

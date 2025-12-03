@@ -23,8 +23,6 @@ add_executable(ZeroEngine ${SOURCES})
 
 target_include_directories(ZeroEngine PRIVATE "${PROJECT_SOURCE_DIR}/../../include")
 
-target_include_directories(ZeroEngine PRIVATE "${PROJECT_SOURCE_DIR}/../../include/sokol")
-
 
 
 
@@ -38,6 +36,8 @@ target_compile_options(ZeroEngine PRIVATE
 
     "-Wpedantic"
 
+    "-std=c++17"
+
 )
 
 
@@ -49,11 +49,7 @@ target_link_libraries(ZeroEngine PRIVATE
 
     GL
 
-    X11
-
-    Xi
-
-    Xcursor
+    glfw
 
     dl
 

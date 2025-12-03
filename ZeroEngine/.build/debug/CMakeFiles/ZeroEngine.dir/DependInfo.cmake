@@ -10,7 +10,6 @@ set(CMAKE_DEPENDS_LANGUAGES
 set(CMAKE_DEPENDS_DEPENDENCY_FILES
   "/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp" "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o" "gcc" "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Renderer.cpp.o.d"
   "/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp" "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o" "gcc" "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/main.cpp.o.d"
-  "/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp" "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o" "gcc" "CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/sokol_impl.cpp.o.d"
   "" "ZeroEngine" "gcc" "CMakeFiles/ZeroEngine.dir/link.d"
   )
 

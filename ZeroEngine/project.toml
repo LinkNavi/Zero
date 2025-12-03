@@ -7,14 +7,16 @@ language = "cpp"
 dirs = ["src"]
 
 [includes]
-dirs = ["include", "include/sokol"]
+dirs = ["include"]
 
 [build]
-flags = ["-Wall", "-Wextra", "-Wpedantic"]
+flags = ["-Wall", "-Wextra", "-Wpedantic", "-std=c++17"]
 optimization = "2"
-libs = ["GL", "X11", "Xi", "Xcursor", "dl", "pthread"]
+libs = ["GL", "glfw", "dl", "pthread"]
 
 [deps]
+# Install GLFW: sudo apt-get install libglfw3-dev
+# That's it! OpenGL comes with your graphics drivers
 
 [scripts]
 # Custom build scripts can be defined here

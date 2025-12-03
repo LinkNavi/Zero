@@ -1,130 +1,138 @@
 #include "Renderer.h"
-#include "sokol/sokol_app.h"
-#include "sokol/sokol_glue.h"
-#include "sokol/sokol_log.h"
+#include <iostream>
 #include <cstring>
-
+#include "glad/glad.h"
 Renderer::~Renderer() {
     if (mInitialized) {
         Shutdown();
     }
 }
 
-void Renderer::Init() {
-    sg_desc desc = {};
-    desc.environment = sglue_environment();
-    desc.logger.func = slog_func;
+bool Renderer::Init() {
+    // GLAD is already initialized by GLFW in main.cpp
     
-    sg_setup(&desc);
+    // Print OpenGL info
+    std::cout << "OpenGL Version: " << glGetString(GL_VERSION) << std::endl;
+    std::cout << "GLSL Version: " << glGetString(GL_SHADING_LANGUAGE_VERSION) << std::endl;
+    std::cout << "Renderer: " << glGetString(GL_RENDERER) << std::endl;
     
-    mPassAction.colors[0].load_action = SG_LOADACTION_CLEAR;
-    mPassAction.colors[0].clear_value = { 0.1f, 0.1f, 0.1f, 1.0f };
+    // Enable depth testing
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    
+    // Enable backface culling
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+    glFrontFace(GL_CCW);
+    
+    // Create default shader
+    mDefaultShader = CreateDefaultShader();
+    if (mDefaultShader == 0) {
+        std::cerr << "Failed to create default shader" << std::endl;
+        return false;
+    }
     
     mInitialized = true;
+    return true;
 }
 
 void Renderer::Shutdown() {
-    if (mDefaultShader.id != 0) {
-        sg_destroy_shader(mDefaultShader);
+    if (mDefaultShader != 0) {
+        glDeleteProgram(mDefaultShader);
+        mDefaultShader = 0;
     }
-    if (mDefaultPipeline.id != 0) {
-        sg_destroy_pipeline(mDefaultPipeline);
-    }
-    sg_shutdown();
     mInitialized = false;
 }
 
 void Renderer::BeginFrame() {
-    sg_pass pass = {};
-    pass.action = mPassAction;
-    pass.swapchain = sglue_swapchain();
-    sg_begin_pass(&pass);
+    glClearColor(mClearColor[0], mClearColor[1], mClearColor[2], mClearColor[3]);
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
 void Renderer::EndFrame() {
-    sg_end_pass();
-    sg_commit();
+    // Nothing needed here - GLFW handles buffer swapping
 }
 
-void Renderer::Clear(float r, float g, float b, float a) {
-    mPassAction.colors[0].clear_value = { r, g, b, a };
+void Renderer::SetClearColor(float r, float g, float b, float a) {
+    mClearColor[0] = r;
+    mClearColor[1] = g;
+    mClearColor[2] = b;
+    mClearColor[3] = a;
 }
 
-sg_buffer Renderer::CreateVertexBuffer(const Vertex* vertices, size_t count) {
-    sg_buffer_desc desc = {};
-    desc.data.ptr = vertices;
-    desc.data.size = count * sizeof(Vertex);
-    return sg_make_buffer(&desc);
+Mesh Renderer::CreateMesh(const Vertex* vertices, uint32_t numVertices,
+                          const uint16_t* indices, uint32_t numIndices) {
+    Mesh mesh = {};
+    mesh.numIndices = numIndices;
+    
+    // Create VAO
+    glGenVertexArrays(1, &mesh.vao);
+    glBindVertexArray(mesh.vao);
+    
+    // Create VBO
+    glGenBuffers(1, &mesh.vbo);
+    glBindBuffer(GL_ARRAY_BUFFER, mesh.vbo);
+    glBufferData(GL_ARRAY_BUFFER, numVertices * sizeof(Vertex), vertices, GL_STATIC_DRAW);
+    
+    // Create EBO
+    glGenBuffers(1, &mesh.ebo);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh.ebo);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, numIndices * sizeof(uint16_t), indices, GL_STATIC_DRAW);
+    
+    // Set vertex attributes
+    // Position (location = 0)
+    glEnableVertexAttribArray(0);
+    glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, position));
+    
+    // Color (location = 1)
+    glEnableVertexAttribArray(1);
+    glVertexAttribPointer(1, 4, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, color));
+    
+    // TexCoord (location = 2)
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, texcoord));
+    
+    // Unbind
+    glBindVertexArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    
+    return mesh;
 }
 
-sg_buffer Renderer::CreateIndexBuffer(const uint16_t* indices, size_t count) {
-    sg_buffer_desc desc = {};
-    desc.usage.index_buffer = true;
-    desc.data.ptr = indices;
-    desc.data.size = count * sizeof(uint16_t);
-    return sg_make_buffer(&desc);
-}
-
-sg_shader Renderer::CreateShader(const char* vs_src, const char* fs_src) {
-    sg_shader_desc desc = {};
-    desc.vertex_func.source = vs_src;
-    desc.fragment_func.source = fs_src;
-    return sg_make_shader(&desc);
-}
-
-sg_pipeline Renderer::CreatePipeline(sg_shader shader, sg_vertex_layout_state layout) {
-    sg_pipeline_desc desc = {};
-    desc.shader = shader;
-    desc.layout = layout;
-    desc.index_type = SG_INDEXTYPE_UINT16;
-    desc.cull_mode = SG_CULLMODE_BACK;
-    desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
-    desc.depth.write_enabled = true;
-    return sg_make_pipeline(&desc);
-}
-
-void Renderer::DrawMesh(sg_pipeline pipeline, sg_bindings bindings, int numElements) {
-    sg_apply_pipeline(pipeline);
-    sg_apply_bindings(&bindings);
-    sg_draw(0, numElements, 1);
-}
-
-void Renderer::DrawMeshWithUniforms(sg_pipeline pipeline, sg_bindings bindings,
-                                    const void* uniformData, size_t uniformSize, int numElements) {
-    sg_apply_pipeline(pipeline);
-    sg_apply_bindings(&bindings);
-    sg_range uniform_data = { uniformData, uniformSize };
-    sg_apply_uniforms(0, &uniform_data);
-    sg_draw(0, numElements, 1);
-}
-
-void Renderer::CreateCubeMesh(sg_buffer* vbuf, sg_buffer* ibuf, int* numIndices) {
+Mesh Renderer::CreateCube() {
     Vertex vertices[] = {
+        // Front face (red)
         {{-1.0f, -1.0f,  1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
         {{ 1.0f, -1.0f,  1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},
         {{ 1.0f,  1.0f,  1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
         {{-1.0f,  1.0f,  1.0f}, {1.0f, 0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
         
+        // Back face (green)
         {{-1.0f, -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
         {{-1.0f,  1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
         {{ 1.0f,  1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
         {{ 1.0f, -1.0f, -1.0f}, {0.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},
         
+        // Top face (blue)
         {{-1.0f,  1.0f, -1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
         {{-1.0f,  1.0f,  1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
         {{ 1.0f,  1.0f,  1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
         {{ 1.0f,  1.0f, -1.0f}, {0.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
         
+        // Bottom face (yellow)
         {{-1.0f, -1.0f, -1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 0.0f}},
         {{ 1.0f, -1.0f, -1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 0.0f}},
         {{ 1.0f, -1.0f,  1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
         {{-1.0f, -1.0f,  1.0f}, {1.0f, 1.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
         
+        // Right face (magenta)
         {{ 1.0f, -1.0f, -1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
         {{ 1.0f,  1.0f, -1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
         {{ 1.0f,  1.0f,  1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
         {{ 1.0f, -1.0f,  1.0f}, {1.0f, 0.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
         
+        // Left face (cyan)
         {{-1.0f, -1.0f, -1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
         {{-1.0f, -1.0f,  1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
         {{-1.0f,  1.0f,  1.0f}, {0.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
@@ -132,20 +140,18 @@ void Renderer::CreateCubeMesh(sg_buffer* vbuf, sg_buffer* ibuf, int* numIndices)
     };
     
     uint16_t indices[] = {
-        0, 1, 2,  0, 2, 3,
-        4, 5, 6,  4, 6, 7,
-        8, 9, 10, 8, 10, 11,
-        12, 13, 14, 12, 14, 15,
-        16, 17, 18, 16, 18, 19,
-        20, 21, 22, 20, 22, 23
+        0, 1, 2,  0, 2, 3,      // Front
+        4, 5, 6,  4, 6, 7,      // Back
+        8, 9, 10, 8, 10, 11,    // Top
+        12, 13, 14, 12, 14, 15, // Bottom
+        16, 17, 18, 16, 18, 19, // Right
+        20, 21, 22, 20, 22, 23  // Left
     };
     
-    *vbuf = CreateVertexBuffer(vertices, 24);
-    *ibuf = CreateIndexBuffer(indices, 36);
-    *numIndices = 36;
+    return CreateMesh(vertices, 24, indices, 36);
 }
 
-void Renderer::CreateQuadMesh(sg_buffer* vbuf, sg_buffer* ibuf, int* numIndices) {
+Mesh Renderer::CreateQuad() {
     Vertex vertices[] = {
         {{-1.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, {0.0f, 0.0f}},
         {{ 1.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 1.0f, 1.0f}, {1.0f, 0.0f}},
@@ -155,64 +161,139 @@ void Renderer::CreateQuadMesh(sg_buffer* vbuf, sg_buffer* ibuf, int* numIndices)
     
     uint16_t indices[] = { 0, 1, 2, 0, 2, 3 };
     
-    *vbuf = CreateVertexBuffer(vertices, 4);
-    *ibuf = CreateIndexBuffer(indices, 6);
-    *numIndices = 6;
+    return CreateMesh(vertices, 4, indices, 6);
 }
 
-sg_shader Renderer::GetDefaultColorShader() {
-    if (mDefaultShader.id != 0) {
-        return mDefaultShader;
+void Renderer::DestroyMesh(Mesh& mesh) {
+    if (mesh.vao != 0) {
+        glDeleteVertexArrays(1, &mesh.vao);
+        mesh.vao = 0;
+    }
+    if (mesh.vbo != 0) {
+        glDeleteBuffers(1, &mesh.vbo);
+        mesh.vbo = 0;
+    }
+    if (mesh.ebo != 0) {
+        glDeleteBuffers(1, &mesh.ebo);
+        mesh.ebo = 0;
+    }
+}
+
+GLuint Renderer::CompileShader(GLenum type, const char* source) {
+    GLuint shader = glCreateShader(type);
+    glShaderSource(shader, 1, &source, nullptr);
+    glCompileShader(shader);
+    
+    // Check compilation status
+    GLint success;
+    glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
+    if (!success) {
+        char infoLog[512];
+        glGetShaderInfoLog(shader, 512, nullptr, infoLog);
+        std::cerr << "Shader compilation failed:\n" << infoLog << std::endl;
+        glDeleteShader(shader);
+        return 0;
     }
     
-    const char* vs_src = R"(
-        #version 330
-        uniform mat4 mvp;
-        layout(location=0) in vec3 position;
-        layout(location=1) in vec4 color0;
-        out vec4 color;
+    return shader;
+}
+
+GLuint Renderer::LinkProgram(GLuint vertexShader, GLuint fragmentShader) {
+    GLuint program = glCreateProgram();
+    glAttachShader(program, vertexShader);
+    glAttachShader(program, fragmentShader);
+    glLinkProgram(program);
+    
+    // Check linking status
+    GLint success;
+    glGetProgramiv(program, GL_LINK_STATUS, &success);
+    if (!success) {
+        char infoLog[512];
+        glGetProgramInfoLog(program, 512, nullptr, infoLog);
+        std::cerr << "Shader linking failed:\n" << infoLog << std::endl;
+        glDeleteProgram(program);
+        return 0;
+    }
+    
+    return program;
+}
+
+GLuint Renderer::CreateShader(const char* vertexSrc, const char* fragmentSrc) {
+    GLuint vertexShader = CompileShader(GL_VERTEX_SHADER, vertexSrc);
+    if (vertexShader == 0) return 0;
+    
+    GLuint fragmentShader = CompileShader(GL_FRAGMENT_SHADER, fragmentSrc);
+    if (fragmentShader == 0) {
+        glDeleteShader(vertexShader);
+        return 0;
+    }
+    
+    GLuint program = LinkProgram(vertexShader, fragmentShader);
+    
+    // Shaders can be deleted after linking
+    glDeleteShader(vertexShader);
+    glDeleteShader(fragmentShader);
+    
+    return program;
+}
+
+GLuint Renderer::CreateDefaultShader() {
+    const char* vertexSrc = R"(
+        #version 330 core
+        
+        layout(location = 0) in vec3 aPosition;
+        layout(location = 1) in vec4 aColor;
+        layout(location = 2) in vec2 aTexCoord;
+        
+        uniform mat4 uMVP;
+        
+        out vec4 vColor;
+        out vec2 vTexCoord;
+        
         void main() {
-            gl_Position = mvp * vec4(position, 1.0);
-            color = color0;
+            gl_Position = uMVP * vec4(aPosition, 1.0);
+            vColor = aColor;
+            vTexCoord = aTexCoord;
         }
     )";
     
-    const char* fs_src = R"(
-        #version 330
-        in vec4 color;
-        out vec4 frag_color;
+    const char* fragmentSrc = R"(
+        #version 330 core
+        
+        in vec4 vColor;
+        in vec2 vTexCoord;
+        
+        out vec4 FragColor;
+        
         void main() {
-            frag_color = color;
+            FragColor = vColor;
         }
     )";
     
-    sg_shader_desc desc = {};
-    desc.vertex_func.source = vs_src;
-    desc.uniform_blocks[0].stage = SG_SHADERSTAGE_VERTEX;
-    desc.uniform_blocks[0].size = sizeof(MVP);
-    desc.uniform_blocks[0].glsl_uniforms[0].glsl_name = "mvp";
-    desc.uniform_blocks[0].glsl_uniforms[0].type = SG_UNIFORMTYPE_MAT4;
-    desc.fragment_func.source = fs_src;
-    
-    mDefaultShader = sg_make_shader(&desc);
-    return mDefaultShader;
+    return CreateShader(vertexSrc, fragmentSrc);
 }
 
-sg_pipeline Renderer::CreateDefaultColorPipeline() {
-    if (mDefaultPipeline.id != 0) {
-        return mDefaultPipeline;
+void Renderer::DestroyShader(GLuint program) {
+    if (program != 0) {
+        glDeleteProgram(program);
+    }
+}
+
+void Renderer::DrawMesh(const Mesh& mesh, GLuint shader, const float* mvp) {
+    glUseProgram(shader);
+    
+    // Set MVP uniform
+    GLint mvpLoc = glGetUniformLocation(shader, "uMVP");
+    if (mvpLoc != -1) {
+        glUniformMatrix4fv(mvpLoc, 1, GL_FALSE, mvp);
     }
     
-    sg_pipeline_desc desc = {};
-    desc.shader = GetDefaultColorShader();
-    desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
-    desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT4;
-    desc.layout.attrs[2].format = SG_VERTEXFORMAT_FLOAT2;
-    desc.index_type = SG_INDEXTYPE_UINT16;
-    desc.cull_mode = SG_CULLMODE_BACK;
-    desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
-    desc.depth.write_enabled = true;
-    
-    mDefaultPipeline = sg_make_pipeline(&desc);
-    return mDefaultPipeline;
+    // Bind VAO and draw
+    glBindVertexArray(mesh.vao);
+    glDrawElements(GL_TRIANGLES, mesh.numIndices, GL_UNSIGNED_SHORT, 0);
+    glBindVertexArray(0);
+}
+
+void Renderer::SetViewport(int width, int height) {
+    glViewport(0, 0, width, height);
 }

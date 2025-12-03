@@ -1,9 +1,8 @@
 #ifndef RENDERER_H
 #define RENDERER_H
 
-#include "sokol/sokol_app.h"
-#include "sokol/sokol_gfx.h"
-#include "sokol/sokol_glue.h"
+#include <glad/glad.h>
+#include <string>
 #include <vector>
 
 struct Vertex {
@@ -12,8 +11,11 @@ struct Vertex {
     float texcoord[2];
 };
 
-struct MVP {
-    float mvp[16];
+struct Mesh {
+    GLuint vao;
+    GLuint vbo;
+    GLuint ebo;
+    uint32_t numIndices;
 };
 
 class Renderer {
@@ -21,36 +23,40 @@ public:
     Renderer() = default;
     ~Renderer();
 
-    void Init();
+    bool Init();
     void Shutdown();
     void BeginFrame();
     void EndFrame();
-    void Clear(float r, float g, float b, float a = 1.0f);
+    void SetClearColor(float r, float g, float b, float a = 1.0f);
     
-    sg_buffer CreateVertexBuffer(const Vertex* vertices, size_t count);
-    sg_buffer CreateIndexBuffer(const uint16_t* indices, size_t count);
-    sg_shader CreateShader(const char* vs_src, const char* fs_src);
-    sg_pipeline CreatePipeline(sg_shader shader, sg_vertex_layout_state layout);
+    // Mesh creation
+    Mesh CreateMesh(const Vertex* vertices, uint32_t numVertices, 
+                    const uint16_t* indices, uint32_t numIndices);
+    Mesh CreateCube();
+    Mesh CreateQuad();
+    void DestroyMesh(Mesh& mesh);
     
-    void DrawMesh(sg_pipeline pipeline, sg_bindings bindings, int numElements);
-    void DrawMeshWithUniforms(sg_pipeline pipeline, sg_bindings bindings, 
-                              const void* uniformData, size_t uniformSize, int numElements);
+    // Shader management
+    GLuint CreateShader(const char* vertexSrc, const char* fragmentSrc);
+    GLuint CreateDefaultShader();
+    void DestroyShader(GLuint program);
     
-    void CreateCubeMesh(sg_buffer* vbuf, sg_buffer* ibuf, int* numIndices);
-    void CreateQuadMesh(sg_buffer* vbuf, sg_buffer* ibuf, int* numIndices);
+    // Drawing
+    void DrawMesh(const Mesh& mesh, GLuint shader, const float* mvp);
     
-    sg_shader GetDefaultColorShader();
-    sg_pipeline CreateDefaultColorPipeline();
+    // Utilities
+    void SetViewport(int width, int height);
     
-    int GetWidth() const { return sapp_width(); }
-    int GetHeight() const { return sapp_height(); }
-    float GetAspectRatio() const { return (float)sapp_width() / (float)sapp_height(); }
+    bool IsInitialized() const { return mInitialized; }
 
 private:
-    sg_pass_action mPassAction = {};
-    sg_shader mDefaultShader = {};
-    sg_pipeline mDefaultPipeline = {};
     bool mInitialized = false;
+    float mClearColor[4] = {0.1f, 0.1f, 0.1f, 1.0f};
+    
+    GLuint mDefaultShader = 0;
+    
+    GLuint CompileShader(GLenum type, const char* source);
+    GLuint LinkProgram(GLuint vertexShader, GLuint fragmentShader);
 };
 
 #endif // RENDERER_H
