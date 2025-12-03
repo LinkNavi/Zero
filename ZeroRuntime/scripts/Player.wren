@@ -1,31 +1,65 @@
-class Player {
+kclass Player {
     construct new() {
-        _speed = 5.0
-        _jumpForce = 10.0
+        _speed = 10.0
+        _jumpForce = 15.0
+        _isGrounded = true
+        _yVelocity = 0
+        _gravity = -30.0
     }
 
     start() {
-        System.print("Player ready!")
+        Debug.log("Player initialized!")
+        var entity = Entity.new()
+        Debug.log("Player entity ID: %(entity.getId())")
     }
 
     update(dt) {
         var entity = Entity.new()
+        var pos = entity.getPosition()
         var vel = entity.getVelocity()
         
         var vx = 0
-        var vy = vel[1]  // Preserve Y velocity
+        var vy = vel[1]
         var vz = 0
 
-        // WASD movement
-        if (Input.isKeyDown(87)) vz = vz - _speed  // W
-        if (Input.isKeyDown(83)) vz = vz + _speed  // S
-        if (Input.isKeyDown(65)) vx = vx - _speed  // A
-        if (Input.isKeyDown(68)) vx = vx + _speed  // D
+        // WASD movement using Key constants
+        if (Input.isKeyDown(Key.W)) vz = vz - _speed
+        if (Input.isKeyDown(Key.S)) vz = vz + _speed
+        if (Input.isKeyDown(Key.A)) vx = vx - _speed
+        if (Input.isKeyDown(Key.D)) vx = vx + _speed
+
+        // Sprint with Shift
+        if (Input.isKeyDown(Key.LEFT_SHIFT)) {
+            vx = vx * 2
+            vz = vz * 2
+        }
+
+        // Simple ground check (y <= 1)
+        _isGrounded = pos[1] <= 1.0
+
+        // Apply gravity
+        if (!_isGrounded) {
+            _yVelocity = _yVelocity + (_gravity * dt)
+        } else {
+            _yVelocity = 0
+            if (pos[1] < 1.0) {
+                entity.setPosition(pos[0], 1.0, pos[2])
+            }
+        }
 
         // Jump
-        if (Input.isKeyPressed(32)) vy = _jumpForce
+        if (Input.isKeyPressed(Key.SPACE) && _isGrounded) {
+            _yVelocity = _jumpForce
+            Debug.log("Player jumped!")
+        }
+
+        vy = _yVelocity
 
         entity.setVelocity(vx, vy, vz)
+
+        // Debug visualization
+        if (Input.isKeyDown(Key.F)) {
+            Debug.drawSphere(pos[0], pos[1], pos[2], 2.0)
+        }
     }
 }
-
