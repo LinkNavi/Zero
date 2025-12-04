@@ -42,5 +42,12 @@ target_compile_options(ZeroEngine PRIVATE
 
 
 
+# Additional libraries
+target_link_libraries(ZeroEngine PRIVATE 
+
+    wren
+
+)
+
 
 

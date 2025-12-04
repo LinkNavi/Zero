@@ -201,6 +201,9 @@ ZeroEngine_BINARY_DIR:STATIC=/home/kirby/Programming/Zero/ZeroEngine/.build/debu
 //Value Computed by CMake
 ZeroEngine_IS_TOP_LEVEL:STATIC=ON
 
+//Dependencies for the target
+ZeroEngine_LIB_DEPENDS:STATIC=general;wren;
+
 //Value Computed by CMake
 ZeroEngine_SOURCE_DIR:STATIC=/home/kirby/Programming/Zero/ZeroEngine/.build/debug
 

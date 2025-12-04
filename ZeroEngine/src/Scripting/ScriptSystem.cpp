@@ -335,7 +335,7 @@ WrenForeignClassMethods ScriptingEngine::WrenBindForeignClass(WrenVM* vm, const 
 }
 
 void ScriptingEngine::RegisterAPI() {
-    const char* apiSource = R"(
+const char* apiSource = R"WREN(
         // Entity manipulation
         foreign class Entity {
             foreign getPosition()
@@ -436,7 +436,8 @@ void ScriptingEngine::RegisterAPI() {
                 )
             }
             
-            toString { "Vector3(%(x), %(y), %(z))" ;}
+           toString { "Vector3(%(x), %(y), %(z))" }
+
 
 
         // Key codes (matching Raylib)
@@ -478,7 +479,7 @@ void ScriptingEngine::RegisterAPI() {
             static W { 87 }
             static X { 88 }
             static Y { 89 }
-            static Z { 90 };
+            static Z { 90 }
         }
 
         class Mouse {
@@ -486,7 +487,8 @@ void ScriptingEngine::RegisterAPI() {
             static RIGHT { 1 }
             static MIDDLE { 2 }
         }
-    )";
+  
+)WREN";
 
     WrenInterpretResult result = wrenInterpret(vm_, "engine", apiSource);
     if (result != WREN_RESULT_SUCCESS) {
@@ -803,10 +805,10 @@ void ScriptingEngine::API_DebugLog(WrenVM* vm) {
 
     switch (t) {
         case WREN_TYPE_STRING:
-            LOG_INFO("%s", wrenGetSlotString(vm, 1));
+            LOG_INFO(std::string(wrenGetSlotString(vm, 1)));
             break;
         case WREN_TYPE_NUM:
-            LOG_INFO("%f", wrenGetSlotDouble(vm, 1));
+             LOG_INFO(std::to_string(wrenGetSlotDouble(vm, 1)));
             break;
         default:
             LOG_INFO("<non-printable type to DebugLog>");
@@ -823,7 +825,7 @@ void ScriptingEngine::API_DebugDrawLine(WrenVM* vm) {
     float y2 = (float)wrenGetSlotDouble(vm, 5);
     float z2 = (float)wrenGetSlotDouble(vm, 6);
 
-    DebugRenderer::DrawLine({x1, y1, z1}, {x2, y2, z2});
+    //DebugRenderer::DrawLine({x1, y1, z1}, {x2, y2, z2});
 }
 
 void ScriptingEngine::API_DebugDrawSphere(WrenVM* vm) {
@@ -833,7 +835,7 @@ void ScriptingEngine::API_DebugDrawSphere(WrenVM* vm) {
 
     float r = (float)wrenGetSlotDouble(vm, 4);
 
-    DebugRenderer::DrawSphere({x, y, z}, r);
+    //DebugRenderer::DrawSphere({x, y, z}, r);
 }
 
 

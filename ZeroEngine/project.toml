@@ -12,7 +12,7 @@ dirs = ["include"]
 [build]
 flags = ["-Wall", "-Wextra", "-Wpedantic"]
 optimization = "2"
-
+libs = ["wren"]
 [deps]
 
 [scripts]
