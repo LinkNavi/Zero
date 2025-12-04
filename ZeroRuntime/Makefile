@@ -1,7 +1,7 @@
 
 CXX = g++
 CXXFLAGS = -Wall -Wextra -Wpedantic -Iinclude -I../ZeroEngine/include
-LDFLAGS = -lraylib
+LDFLAGS = -lraylib -lwren
 
 SRC_DIR = src
 

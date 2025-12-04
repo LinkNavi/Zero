@@ -14,7 +14,8 @@ flags = ["-Wall", "-Wextra", "-Wpedantic"]
 optimization = "2"
 
 # Link the static engine library directly and also link raylib
-libs = ["raylib"]
+libs = ["raylib", "wren"]
+
 
 
 # If you use any additional lib dirs (optional for system libs)
