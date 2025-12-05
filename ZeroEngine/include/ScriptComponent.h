@@ -1,52 +1,58 @@
 #pragma once
 #include <string>
 #include <memory>
-#include <unordered_map>
-#include <wren.h>
+#include <angelscript.h>
 
 // Forward declarations
 class ScriptInstance;
 
 // Script Component - Attached to entities that have scripts
 struct ScriptComponent {
-    std::string scriptPath;           // Path to .wren file
-    std::string className;            // Class name in Wren (e.g., "Player")
+    std::string scriptPath;           // Path to .as file
+    std::string className;            // Class name in AngelScript (e.g., "Player")
     std::shared_ptr<ScriptInstance> instance;  // Runtime instance
     bool isInitialized = false;
     bool enabled = true;
 };
 
-// Represents a single script instance in Wren
+// Represents a single script instance in AngelScript
 class ScriptInstance {
 public:
-    ScriptInstance(WrenVM* vm, WrenHandle* classHandle, WrenHandle* instanceHandle)
-        : vm_(vm), classHandle_(classHandle), instanceHandle_(instanceHandle) {}
+    ScriptInstance(asIScriptEngine* engine, asIScriptModule* module, 
+                   asIScriptObject* object, asITypeInfo* type)
+        : engine_(engine), module_(module), scriptObject_(object), typeInfo_(type) {
+        
+        if (scriptObject_) scriptObject_->AddRef();
+        
+        // Cache method pointers for performance
+        startMethod_ = typeInfo_->GetMethodByDecl("void Start()");
+        updateMethod_ = typeInfo_->GetMethodByDecl("void Update(float)");
+        onDestroyMethod_ = typeInfo_->GetMethodByDecl("void OnDestroy()");
+    }
 
     ~ScriptInstance() {
-        if (vm_) {
-            if (instanceHandle_) wrenReleaseHandle(vm_, instanceHandle_);
-            if (classHandle_) wrenReleaseHandle(vm_, classHandle_);
+        if (scriptObject_) {
+            scriptObject_->Release();
         }
     }
 
-    WrenVM* GetVM() const { return vm_; }
-    WrenHandle* GetClassHandle() const { return classHandle_; }
-    WrenHandle* GetInstanceHandle() const { return instanceHandle_; }
+    asIScriptEngine* GetEngine() const { return engine_; }
+    asIScriptObject* GetObject() const { return scriptObject_; }
+    asIScriptModule* GetModule() const { return module_; }
 
-    // Call a method on this instance
-    template<typename... Args>
-    bool CallMethod(const std::string& signature, Args... args);
+    // Call methods on this instance
+    bool CallStart();
+    bool CallUpdate(float dt);
+    bool CallOnDestroy();
 
 private:
-    WrenVM* vm_;
-    WrenHandle* classHandle_;
-    WrenHandle* instanceHandle_;
+    asIScriptEngine* engine_;
+    asIScriptModule* module_;
+    asIScriptObject* scriptObject_;
+    asITypeInfo* typeInfo_;
+    
+    // Cached method pointers
+    asIScriptFunction* startMethod_ = nullptr;
+    asIScriptFunction* updateMethod_ = nullptr;
+    asIScriptFunction* onDestroyMethod_ = nullptr;
 };
-
-// Script method signatures that scripts can implement
-namespace ScriptMethods {
-    const char* START = "start()";
-    const char* UPDATE = "update(_)";
-    const char* ON_DESTROY = "onDestroy()";
-    const char* ON_COLLISION = "onCollision(_)";
-}

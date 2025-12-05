@@ -3,6 +3,50 @@
 #include <raylib.h>
 
 // ============================================================================
+// ScriptInstance Implementation
+// ============================================================================
+
+bool ScriptInstance::CallStart() {
+    if (!startMethod_) return true; // Method doesn't exist, not an error
+    
+    asIScriptContext* ctx = engine_->CreateContext();
+    ctx->Prepare(startMethod_);
+    ctx->SetObject(scriptObject_);
+    
+    int r = ctx->Execute();
+    ctx->Release();
+    
+    return r == asEXECUTION_FINISHED;
+}
+
+bool ScriptInstance::CallUpdate(float dt) {
+    if (!updateMethod_) return true;
+    
+    asIScriptContext* ctx = engine_->CreateContext();
+    ctx->Prepare(updateMethod_);
+    ctx->SetObject(scriptObject_);
+    ctx->SetArgFloat(0, dt);
+    
+    int r = ctx->Execute();
+    ctx->Release();
+    
+    return r == asEXECUTION_FINISHED;
+}
+
+bool ScriptInstance::CallOnDestroy() {
+    if (!onDestroyMethod_) return true;
+    
+    asIScriptContext* ctx = engine_->CreateContext();
+    ctx->Prepare(onDestroyMethod_);
+    ctx->SetObject(scriptObject_);
+    
+    int r = ctx->Execute();
+    ctx->Release();
+    
+    return r == asEXECUTION_FINISHED;
+}
+
+// ============================================================================
 // ScriptSystem Implementation
 // ============================================================================
 
@@ -60,9 +104,9 @@ void ScriptSystem::InitializeScript(Entity entity, ScriptComponent& script) {
 
     script.isInitialized = true;
 
-    // Call start() method if it exists
+    // Call Start() method if it exists
     ScriptingEngine::Instance().SetCurrentEntity(entity, ecs);
-    CallScriptMethod(script, ScriptMethods::START);
+    script.instance->CallStart();
     
     LOG_DEBUG("Successfully initialized script: " + script.className + " for entity " + std::to_string(entity));
 }
@@ -70,42 +114,8 @@ void ScriptSystem::InitializeScript(Entity entity, ScriptComponent& script) {
 void ScriptSystem::UpdateScript(Entity entity, ScriptComponent& script, float dt) {
     ScriptingEngine::Instance().SetCurrentEntity(entity, ecs);
     
-    WrenVM* vm = script.instance->GetVM();
-    WrenHandle* instance = script.instance->GetInstanceHandle();
-
-    if (!vm || !instance) return;
-
-    // Call update(dt) method
-    wrenEnsureSlots(vm, 2);
-    wrenSetSlotHandle(vm, 0, instance);
-    wrenSetSlotDouble(vm, 1, dt);
-    
-    WrenHandle* updateMethod = wrenMakeCallHandle(vm, ScriptMethods::UPDATE);
-    WrenInterpretResult result = wrenCall(vm, updateMethod);
-    wrenReleaseHandle(vm, updateMethod);
-
-    if (result != WREN_RESULT_SUCCESS) {
+    if (!script.instance->CallUpdate(dt)) {
         LOG_WARN("Script update failed for entity " + std::to_string(entity));
-    }
-}
-
-void ScriptSystem::CallScriptMethod(ScriptComponent& script, const char* signature) {
-    if (!script.instance) return;
-
-    WrenVM* vm = script.instance->GetVM();
-    WrenHandle* instance = script.instance->GetInstanceHandle();
-
-    if (!vm || !instance) return;
-
-    wrenEnsureSlots(vm, 1);
-    wrenSetSlotHandle(vm, 0, instance);
-    
-    WrenHandle* method = wrenMakeCallHandle(vm, signature);
-    WrenInterpretResult result = wrenCall(vm, method);
-    wrenReleaseHandle(vm, method);
-
-    if (result != WREN_RESULT_SUCCESS) {
-        LOG_DEBUG("Method " + std::string(signature) + " not found or failed (this is OK if method doesn't exist)");
     }
 }
 
@@ -114,37 +124,36 @@ void ScriptSystem::CallScriptMethod(ScriptComponent& script, const char* signatu
 // ============================================================================
 
 bool ScriptingEngine::Init() {
-    LOG_INFO("Initializing Wren scripting engine...");
+    LOG_INFO("Initializing AngelScript scripting engine...");
     
-    WrenConfiguration config;
-    wrenInitConfiguration(&config);
+    engine_ = asCreateScriptEngine();
     
-    config.writeFn = &ScriptingEngine::WrenWrite;
-    config.errorFn = &ScriptingEngine::WrenError;
-    config.bindForeignMethodFn = &ScriptingEngine::WrenBindForeignMethod;
-    config.bindForeignClassFn = &ScriptingEngine::WrenBindForeignClass;
-    config.loadModuleFn = &ScriptingEngine::WrenLoadModule;
-
-    vm_ = wrenNewVM(&config);
-    
-    if (!vm_) {
-        LOG_ERROR("Failed to create Wren VM");
+    if (!engine_) {
+        LOG_ERROR("Failed to create AngelScript engine");
         return false;
     }
+
+    // Set message callback
+    engine_->SetMessageCallback(asFUNCTION(MessageCallback), 0, asCALL_CDECL);
+
+    // Register standard add-ons
+    RegisterStdString(engine_);
+    RegisterScriptArray(engine_, true);
+    RegisterScriptMath(engine_);
 
     // Register built-in API
     RegisterAPI();
 
-    LOG_INFO("Wren scripting engine initialized");
+    LOG_INFO("AngelScript scripting engine initialized");
     return true;
 }
 
 void ScriptingEngine::Shutdown() {
-    if (vm_) {
-        wrenFreeVM(vm_);
-        vm_ = nullptr;
+    if (engine_) {
+        engine_->ShutDownAndRelease();
+        engine_ = nullptr;
     }
-    LOG_INFO("Wren scripting engine shutdown");
+    LOG_INFO("AngelScript scripting engine shutdown");
 }
 
 bool ScriptingEngine::LoadScript(const std::string& path, const std::string& moduleName) {
@@ -157,11 +166,30 @@ bool ScriptingEngine::LoadScript(const std::string& path, const std::string& mod
     std::stringstream buffer;
     buffer << file.rdbuf();
     std::string source = buffer.str();
+    file.close();
 
-    WrenInterpretResult result = wrenInterpret(vm_, moduleName.c_str(), source.c_str());
-    
-    if (result != WREN_RESULT_SUCCESS) {
-        LOG_ERROR("Failed to load script: " + path);
+    // Remove old module if it exists
+    asIScriptModule* oldMod = engine_->GetModule(moduleName.c_str(), asGM_ONLY_IF_EXISTS);
+    if (oldMod) {
+        oldMod->Discard();
+    }
+
+    CScriptBuilder builder;
+    int r = builder.StartNewModule(engine_, moduleName.c_str());
+    if (r < 0) {
+        LOG_ERROR("Failed to start new module");
+        return false;
+    }
+
+    r = builder.AddSectionFromMemory(path.c_str(), source.c_str());
+    if (r < 0) {
+        LOG_ERROR("Failed to add script section");
+        return false;
+    }
+
+    r = builder.BuildModule();
+    if (r < 0) {
+        LOG_ERROR("Failed to build script module: " + path);
         return false;
     }
 
@@ -171,32 +199,46 @@ bool ScriptingEngine::LoadScript(const std::string& path, const std::string& mod
 
 std::shared_ptr<ScriptInstance> ScriptingEngine::CreateInstance(const std::string& moduleName, 
                                                                  const std::string& className) {
-    wrenEnsureSlots(vm_, 1);
-    wrenGetVariable(vm_, moduleName.c_str(), className.c_str(), 0);
-    
-    WrenHandle* classHandle = wrenGetSlotHandle(vm_, 0);
-    
-    if (wrenGetSlotType(vm_, 0) == WREN_TYPE_NULL) {
+    asIScriptModule* mod = engine_->GetModule(moduleName.c_str());
+    if (!mod) {
+        LOG_ERROR("Module not found: " + moduleName);
+        return nullptr;
+    }
+
+    asITypeInfo* type = mod->GetTypeInfoByName(className.c_str());
+    if (!type) {
         LOG_ERROR("Class not found: " + className + " in module: " + moduleName);
-        wrenReleaseHandle(vm_, classHandle);
         return nullptr;
     }
-    
-    // Call the constructor
-    wrenSetSlotHandle(vm_, 0, classHandle);
-    WrenHandle* ctorHandle = wrenMakeCallHandle(vm_, "new()");
-    WrenInterpretResult result = wrenCall(vm_, ctorHandle);
-    wrenReleaseHandle(vm_, ctorHandle);
-    
-    if (result != WREN_RESULT_SUCCESS) {
-        LOG_ERROR("Failed to instantiate class: " + className);
-        wrenReleaseHandle(vm_, classHandle);
+
+    // Find the factory function (constructor)
+    asIScriptFunction* factory = type->GetFactoryByDecl((className + " @" + className + "()").c_str());
+    if (!factory) {
+        LOG_ERROR("No default constructor found for class: " + className);
         return nullptr;
     }
+
+    // Create context and call constructor
+    asIScriptContext* ctx = engine_->CreateContext();
+    ctx->Prepare(factory);
     
-    WrenHandle* instanceHandle = wrenGetSlotHandle(vm_, 0);
-    
-    return std::make_shared<ScriptInstance>(vm_, classHandle, instanceHandle);
+    int r = ctx->Execute();
+    if (r != asEXECUTION_FINISHED) {
+        LOG_ERROR("Failed to execute constructor for class: " + className);
+        ctx->Release();
+        return nullptr;
+    }
+
+    // Get the object that was created
+    asIScriptObject* obj = *static_cast<asIScriptObject**>(ctx->GetAddressOfReturnValue());
+    ctx->Release();
+
+    if (!obj) {
+        LOG_ERROR("Failed to create object for class: " + className);
+        return nullptr;
+    }
+
+    return std::make_shared<ScriptInstance>(engine_, mod, obj, type);
 }
 
 void ScriptingEngine::SetCurrentEntity(Entity entity, ECS* ecs) {
@@ -205,447 +247,279 @@ void ScriptingEngine::SetCurrentEntity(Entity entity, ECS* ecs) {
 }
 
 // ============================================================================
-// Wren Callbacks
+// AngelScript Callbacks
 // ============================================================================
 
-void ScriptingEngine::WrenWrite(WrenVM* vm, const char* text) {
-    (void)vm;
-    LOG_INFO("[Wren] " + std::string(text));
-}
-
-void ScriptingEngine::WrenError(WrenVM* vm, WrenErrorType type, const char* module,
-                                 int line, const char* message) {
-    (void)vm;
-    std::string error = std::string(module) + ":" + std::to_string(line) + " - " + message;
+void ScriptingEngine::MessageCallback(const asSMessageInfo* msg, void* param) {
+    (void)param;
     
-    switch (type) {
-        case WREN_ERROR_COMPILE:
-            LOG_ERROR("[Wren Compile] " + error);
+    std::string message = std::string(msg->section) + " (" + 
+                         std::to_string(msg->row) + ", " + 
+                         std::to_string(msg->col) + ") : " + msg->message;
+    
+    switch (msg->type) {
+        case asMSGTYPE_ERROR:
+            LOG_ERROR("[AngelScript] " + message);
             break;
-        case WREN_ERROR_RUNTIME:
-            LOG_ERROR("[Wren Runtime] " + error);
+        case asMSGTYPE_WARNING:
+            LOG_WARN("[AngelScript] " + message);
             break;
-        case WREN_ERROR_STACK_TRACE:
-            LOG_ERROR("[Wren Stack] " + error);
+        case asMSGTYPE_INFORMATION:
+            LOG_INFO("[AngelScript] " + message);
             break;
     }
 }
 
-WrenLoadModuleResult ScriptingEngine::WrenLoadModule(WrenVM* vm, const char* name) {
-    (void)vm;
-    WrenLoadModuleResult result = {0};
-    
-    std::string filename = std::string("scripts/") + name + ".wren";
-    std::ifstream file(filename);
-    
-    if (!file.is_open()) {
-        LOG_ERROR("Failed to load module: " + std::string(name));
-        return result;
-    }
-
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    std::string* source = new std::string(buffer.str());
-    
-    result.source = source->c_str();
-    result.onComplete = [](WrenVM* vm, const char* name, WrenLoadModuleResult result) {
-        (void)vm;
-        (void)name;
-        delete static_cast<const std::string*>(static_cast<const void*>(result.source));
-    };
-    
-    return result;
-}
-
-WrenForeignMethodFn ScriptingEngine::WrenBindForeignMethod(WrenVM* vm, const char* module,
-                                                            const char* className, bool isStatic,
-                                                            const char* signature) {
-    (void)vm;
-    
-    std::string mod(module);
-    std::string cls(className);
-    std::string sig(signature);
-
-    // Entity API
-    if (cls == "Entity") {
-        if (sig == "getPosition()") return &API_GetPosition;
-        if (sig == "setPosition(_,_,_)") return &API_SetPosition;
-        if (sig == "getVelocity()") return &API_GetVelocity;
-        if (sig == "setVelocity(_,_,_)") return &API_SetVelocity;
-        if (sig == "getRotation()") return &API_GetRotation;
-        if (sig == "setRotation(_,_,_)") return &API_SetRotation;
-        if (sig == "getScale()") return &API_GetScale;
-        if (sig == "setScale(_,_,_)") return &API_SetScale;
-        if (sig == "destroy()") return &API_DestroyEntity;
-        if (sig == "getId()") return &API_GetEntityId;
-    }
-
-    // Input API
-    if (cls == "Input") {
-        if (sig == "isKeyDown(_)") return &API_IsKeyDown;
-        if (sig == "isKeyPressed(_)") return &API_IsKeyPressed;
-        if (sig == "isKeyReleased(_)") return &API_IsKeyReleased;
-        if (sig == "isMouseButtonDown(_)") return &API_IsMouseButtonDown;
-        if (sig == "isMouseButtonPressed(_)") return &API_IsMouseButtonPressed;
-        if (sig == "getMousePosition()") return &API_GetMousePosition;
-        if (sig == "getMouseDelta()") return &API_GetMouseDelta;
-    }
-
-    // Time API
-    if (cls == "Time") {
-        if (sig == "getDeltaTime()") return &API_GetDeltaTime;
-        if (sig == "getTime()") return &API_GetTime;
-        if (sig == "getFPS()") return &API_GetFPS;
-    }
-
-    // Math API
-    if (cls == "Math") {
-        if (!isStatic) return nullptr;
-        if (sig == "sin(_)") return &API_Sin;
-        if (sig == "cos(_)") return &API_Cos;
-        if (sig == "tan(_)") return &API_Tan;
-        if (sig == "sqrt(_)") return &API_Sqrt;
-        if (sig == "abs(_)") return &API_Abs;
-        if (sig == "pow(_,_)") return &API_Pow;
-        if (sig == "lerp(_,_,_)") return &API_Lerp;
-        if (sig == "clamp(_,_,_)") return &API_Clamp;
-        if (sig == "radians(_)") return &API_Radians;
-        if (sig == "degrees(_)") return &API_Degrees;
-    }
-
-    // Debug API
-    if (cls == "Debug") {
-        if (!isStatic) return nullptr;
-        if (sig == "log(_)") return &API_DebugLog;
-        if (sig == "drawLine(_,_,_,_,_,_)") return &API_DebugDrawLine;
-        if (sig == "drawSphere(_,_,_,_)") return &API_DebugDrawSphere;
-    }
-
-    return nullptr;
-}
-
-WrenForeignClassMethods ScriptingEngine::WrenBindForeignClass(WrenVM* vm, const char* module,
-                                                               const char* className) {
-    (void)vm;
-    (void)module;
-    (void)className;
-    
-    WrenForeignClassMethods methods = {0};
-    return methods;
-}
+// ============================================================================
+// API Registration
+// ============================================================================
 
 void ScriptingEngine::RegisterAPI() {
-const char* apiSource = R"WREN(
-        // Entity manipulation
-        foreign class Entity {
-            foreign getPosition()
-            foreign setPosition(x, y, z)
-            foreign getVelocity()
-            foreign setVelocity(x, y, z)
-            foreign getRotation()
-            foreign setRotation(x, y, z)
-            foreign getScale()
-            foreign setScale(x, y, z)
-            foreign destroy()
-            foreign getId()
-        }
+    int r;
 
-        // Input handling
-        foreign class Input {
-            foreign static isKeyDown(key)
-            foreign static isKeyPressed(key)
-            foreign static isKeyReleased(key)
-            foreign static isMouseButtonDown(button)
-            foreign static isMouseButtonPressed(button)
-            foreign static getMousePosition()
-            foreign static getMouseDelta()
-        }
+    // Register Vector3
+    RegisterVector3(engine_);
 
-        // Time utilities
-        foreign class Time {
-            foreign static getDeltaTime()
-            foreign static getTime()
-            foreign static getFPS()
-        }
+    // Register Entity class
+    r = engine_->RegisterObjectType("Entity", 0, asOBJ_REF | asOBJ_NOCOUNT); assert(r >= 0);
+    r = engine_->RegisterObjectMethod("Entity", "array<float>@ GetPosition()", 
+        asFUNCTION(API_Entity_GetPosition), asCALL_CDECL_OBJLAST); assert(r >= 0);
+    r = engine_->RegisterObjectMethod("Entity", "void SetPosition(float, float, float)", 
+        asFUNCTION(API_Entity_SetPosition), asCALL_CDECL_OBJLAST); assert(r >= 0);
+    r = engine_->RegisterObjectMethod("Entity", "array<float>@ GetVelocity()", 
+        asFUNCTION(API_Entity_GetVelocity), asCALL_CDECL_OBJLAST); assert(r >= 0);
+    r = engine_->RegisterObjectMethod("Entity", "void SetVelocity(float, float, float)", 
+        asFUNCTION(API_Entity_SetVelocity), asCALL_CDECL_OBJLAST); assert(r >= 0);
+    r = engine_->RegisterObjectMethod("Entity", "array<float>@ GetRotation()", 
+        asFUNCTION(API_Entity_GetRotation), asCALL_CDECL_OBJLAST); assert(r >= 0);
+    r = engine_->RegisterObjectMethod("Entity", "void SetRotation(float, float, float)", 
+        asFUNCTION(API_Entity_SetRotation), asCALL_CDECL_OBJLAST); assert(r >= 0);
+    r = engine_->RegisterObjectMethod("Entity", "array<float>@ GetScale()", 
+        asFUNCTION(API_Entity_GetScale), asCALL_CDECL_OBJLAST); assert(r >= 0);
+    r = engine_->RegisterObjectMethod("Entity", "void SetScale(float, float, float)", 
+        asFUNCTION(API_Entity_SetScale), asCALL_CDECL_OBJLAST); assert(r >= 0);
+    r = engine_->RegisterObjectMethod("Entity", "void Destroy()", 
+        asFUNCTION(API_Entity_Destroy), asCALL_CDECL_OBJLAST); assert(r >= 0);
+    r = engine_->RegisterObjectMethod("Entity", "int GetId()", 
+        asFUNCTION(API_Entity_GetId), asCALL_CDECL_OBJLAST); assert(r >= 0);
 
-        // Math utilities
-        foreign class Math {
-            foreign static sin(angle)
-            foreign static cos(angle)
-            foreign static tan(angle)
-            foreign static sqrt(value)
-            foreign static abs(value)
-            foreign static pow(base, exp)
-            foreign static lerp(a, b, t)
-            foreign static clamp(value, min, max)
-            foreign static radians(degrees)
-            foreign static degrees(radians)
-            
-            static pi { 3.14159265359 }
-            static tau { 6.28318530718 }
-        }
+    // Register global function to get current entity
+    r = engine_->RegisterGlobalFunction("Entity@ GetEntity()", 
+        asFUNCTION(API_GetEntity), asCALL_GENERIC); assert(r >= 0);
 
-        // Debug utilities
-        foreign class Debug {
-            foreign static log(message)
-            foreign static drawLine(x1, y1, z1, x2, y2, z2)
-            foreign static drawSphere(x, y, z, radius)
-        }
+    // Register Input namespace
+    r = engine_->RegisterGlobalFunction("bool IsKeyDown(int)", 
+        asFUNCTION(API_Input_IsKeyDown), asCALL_CDECL); assert(r >= 0);
+    r = engine_->RegisterGlobalFunction("bool IsKeyPressed(int)", 
+        asFUNCTION(API_Input_IsKeyPressed), asCALL_CDECL); assert(r >= 0);
+    r = engine_->RegisterGlobalFunction("bool IsKeyReleased(int)", 
+        asFUNCTION(API_Input_IsKeyReleased), asCALL_CDECL); assert(r >= 0);
+    r = engine_->RegisterGlobalFunction("bool IsMouseButtonDown(int)", 
+        asFUNCTION(API_Input_IsMouseButtonDown), asCALL_CDECL); assert(r >= 0);
+    r = engine_->RegisterGlobalFunction("bool IsMouseButtonPressed(int)", 
+        asFUNCTION(API_Input_IsMouseButtonPressed), asCALL_CDECL); assert(r >= 0);
 
-        // Vector3 helper class
-        class Vector3 {
-            construct new(x, y, z) {
-                _x = x
-                _y = y
-                _z = z
-            }
-            
-            x { _x }
-            y { _y }
-            z { _z }
-            x=(v) { _x = v }
-            y=(v) { _y = v }
-            z=(v) { _z = v }
-            
-            +(other) { Vector3.new(_x + other.x, _y + other.y, _z + other.z) }
-            -(other) { Vector3.new(_x - other.x, _y - other.y, _z - other.z) }
-            *(scalar) { Vector3.new(_x * scalar, _y * scalar, _z * scalar) }
-            /(scalar) { Vector3.new(_x / scalar, _y / scalar, _z / scalar) }
-            
-            length { Math.sqrt(_x * _x + _y * _y + _z * _z) }
-            normalized {
-                var len = length
-                if (len > 0) return this / len
-                return Vector3.new(0, 0, 0)
-            }
-            
-            dot(other) { _x * other.x + _y * other.y + _z * other.z }
-            
-            static distance(a, b) {
-                var dx = a.x - b.x
-                var dy = a.y - b.y
-                var dz = a.z - b.z
-                return Math.sqrt(dx * dx + dy * dy + dz * dz)
-            }
-            
-            static lerp(a, b, t) {
-                return Vector3.new(
-                    Math.lerp(a.x, b.x, t),
-                    Math.lerp(a.y, b.y, t),
-                    Math.lerp(a.z, b.z, t)
-                )
-            }
-            
-           toString { "Vector3(%(x), %(y), %(z))" }
+    // Register Time functions
+    r = engine_->RegisterGlobalFunction("float GetDeltaTime()", 
+        asFUNCTION(API_Time_GetDeltaTime), asCALL_CDECL); assert(r >= 0);
+    r = engine_->RegisterGlobalFunction("double GetTime()", 
+        asFUNCTION(API_Time_GetTime), asCALL_CDECL); assert(r >= 0);
+    r = engine_->RegisterGlobalFunction("int GetFPS()", 
+        asFUNCTION(API_Time_GetFPS), asCALL_CDECL); assert(r >= 0);
 
+    // Register Debug functions
+    r = engine_->RegisterGlobalFunction("void Print(const string &in)", 
+        asFUNCTION(API_Debug_Log), asCALL_CDECL); assert(r >= 0);
+    r = engine_->RegisterGlobalFunction("void DrawLine(float, float, float, float, float, float)", 
+        asFUNCTION(API_Debug_DrawLine), asCALL_CDECL); assert(r >= 0);
+    r = engine_->RegisterGlobalFunction("void DrawSphere(float, float, float, float)", 
+        asFUNCTION(API_Debug_DrawSphere), asCALL_CDECL); assert(r >= 0);
 
+    // Register Key constants
+    r = engine_->RegisterEnum("Key"); assert(r >= 0);
+    r = engine_->RegisterEnumValue("Key", "SPACE", KEY_SPACE); assert(r >= 0);
+    r = engine_->RegisterEnumValue("Key", "ESCAPE", KEY_ESCAPE); assert(r >= 0);
+    r = engine_->RegisterEnumValue("Key", "ENTER", KEY_ENTER); assert(r >= 0);
+    r = engine_->RegisterEnumValue("Key", "W", KEY_W); assert(r >= 0);
+    r = engine_->RegisterEnumValue("Key", "A", KEY_A); assert(r >= 0);
+    r = engine_->RegisterEnumValue("Key", "S", KEY_S); assert(r >= 0);
+    r = engine_->RegisterEnumValue("Key", "D", KEY_D); assert(r >= 0);
+    r = engine_->RegisterEnumValue("Key", "LEFT_SHIFT", KEY_LEFT_SHIFT); assert(r >= 0);
+    r = engine_->RegisterEnumValue("Key", "UP", KEY_UP); assert(r >= 0);
+    r = engine_->RegisterEnumValue("Key", "DOWN", KEY_DOWN); assert(r >= 0);
+    r = engine_->RegisterEnumValue("Key", "LEFT", KEY_LEFT); assert(r >= 0);
+    r = engine_->RegisterEnumValue("Key", "RIGHT", KEY_RIGHT); assert(r >= 0);
 
-        // Key codes (matching Raylib)
-        class Key {
-            static SPACE { 32 }
-            static ESCAPE { 256 }
-            static ENTER { 257 }
-            static TAB { 258 }
-            static BACKSPACE { 259 }
-            static RIGHT { 262 }
-            static LEFT { 263 }
-            static DOWN { 264 }
-            static UP { 265 }
-            static LEFT_SHIFT { 340 }
-            static LEFT_CONTROL { 341 }
-            static LEFT_ALT { 342 }
-            static A { 65 }
-            static B { 66 }
-            static C { 67 }
-            static D { 68 }
-            static E { 69 }
-            static F { 70 }
-            static G { 71 }
-            static H { 72 }
-            static I { 73 }
-            static J { 74 }
-            static K { 75 }
-            static L { 76 }
-            static M { 77 }
-            static N { 78 }
-            static O { 79 }
-            static P { 80 }
-            static Q { 81 }
-            static R { 82 }
-            static S { 83 }
-            static T { 84 }
-            static U { 85 }
-            static V { 86 }
-            static W { 87 }
-            static X { 88 }
-            static Y { 89 }
-            static Z { 90 }
-        }
+    LOG_DEBUG("AngelScript API registered successfully");
+}
 
-        class Mouse {
-            static LEFT { 0 }
-            static RIGHT { 1 }
-            static MIDDLE { 2 }
-        }
-  
-)WREN";
-
-    WrenInterpretResult result = wrenInterpret(vm_, "engine", apiSource);
-    if (result != WREN_RESULT_SUCCESS) {
-        LOG_ERROR("Failed to register Wren API");
-    }
+void ScriptingEngine::RegisterVector3(asIScriptEngine* engine) {
+    int r;
+    r = engine->RegisterObjectType("Vector3", sizeof(Vector3Wrapper), asOBJ_VALUE | asOBJ_POD | asOBJ_APP_CLASS_CAK); assert(r >= 0);
+    
+    r = engine->RegisterObjectBehaviour("Vector3", asBEHAVE_CONSTRUCT, "void f()", 
+        asFUNCTION([](Vector3Wrapper* self) { new(self) Vector3Wrapper(); }), asCALL_CDECL_OBJLAST); assert(r >= 0);
+    r = engine->RegisterObjectBehaviour("Vector3", asBEHAVE_CONSTRUCT, "void f(float, float, float)", 
+        asFUNCTION([](float x, float y, float z, Vector3Wrapper* self) { new(self) Vector3Wrapper(x, y, z); }), asCALL_CDECL_OBJLAST); assert(r >= 0);
+    
+    r = engine->RegisterObjectProperty("Vector3", "float x", asOFFSET(Vector3Wrapper, x)); assert(r >= 0);
+    r = engine->RegisterObjectProperty("Vector3", "float y", asOFFSET(Vector3Wrapper, y)); assert(r >= 0);
+    r = engine->RegisterObjectProperty("Vector3", "float z", asOFFSET(Vector3Wrapper, z)); assert(r >= 0);
+    
+    r = engine->RegisterObjectMethod("Vector3", "Vector3 opAdd(const Vector3 &in) const", 
+        asMETHODPR(Vector3Wrapper, operator+, (const Vector3Wrapper&) const, Vector3Wrapper), asCALL_THISCALL); assert(r >= 0);
+    r = engine->RegisterObjectMethod("Vector3", "Vector3 opSub(const Vector3 &in) const", 
+        asMETHODPR(Vector3Wrapper, operator-, (const Vector3Wrapper&) const, Vector3Wrapper), asCALL_THISCALL); assert(r >= 0);
+    r = engine->RegisterObjectMethod("Vector3", "Vector3 opMul(float) const", 
+        asMETHODPR(Vector3Wrapper, operator*, (float) const, Vector3Wrapper), asCALL_THISCALL); assert(r >= 0);
+    r = engine->RegisterObjectMethod("Vector3", "Vector3 opDiv(float) const", 
+        asMETHODPR(Vector3Wrapper, operator/, (float) const, Vector3Wrapper), asCALL_THISCALL); assert(r >= 0);
+    
+    r = engine->RegisterObjectMethod("Vector3", "float Length() const", 
+        asMETHOD(Vector3Wrapper, Length), asCALL_THISCALL); assert(r >= 0);
+    r = engine->RegisterObjectMethod("Vector3", "Vector3 Normalized() const", 
+        asMETHOD(Vector3Wrapper, Normalized), asCALL_THISCALL); assert(r >= 0);
+    r = engine->RegisterObjectMethod("Vector3", "float Dot(const Vector3 &in) const", 
+        asMETHOD(Vector3Wrapper, Dot), asCALL_THISCALL); assert(r >= 0);
+    
+    r = engine->RegisterObjectMethod("Vector3", "float Distance(const Vector3 &in, const Vector3 &in)", 
+        asFUNCTION(Vector3Wrapper::Distance), asCALL_CDECL_OBJLAST); assert(r >= 0);
 }
 
 // ============================================================================
-// Foreign Method Implementations - Entity API
+// API Implementation - Entity
 // ============================================================================
 
-void ScriptingEngine::API_GetPosition(WrenVM* vm) {
+void ScriptingEngine::API_GetEntity(asIScriptGeneric* gen) {
+    // Return a dummy entity object (the entity is accessed through context)
+    gen->SetReturnAddress(nullptr); // Entity is managed by context
+}
+
+CScriptArray* ScriptingEngine::API_Entity_GetPosition() {
     ScriptingEngine& engine = ScriptingEngine::Instance();
     Entity entity = engine.GetCurrentEntity();
     ECS* ecs = engine.GetCurrentECS();
 
-    if (!ecs || entity == INVALID_ENTITY || !ecs->HasComponent<ZeroTransform>(entity)) {
-        wrenSetSlotNewList(vm, 0);
-        return;
+    asIScriptContext* ctx = asGetActiveContext();
+    asIScriptEngine* scriptEngine = ctx->GetEngine();
+    asITypeInfo* arrayType = scriptEngine->GetTypeInfoByDecl("array<float>");
+    CScriptArray* arr = CScriptArray::Create(arrayType, 3);
+
+    if (ecs && entity != INVALID_ENTITY && ecs->HasComponent<ZeroTransform>(entity)) {
+        auto& t = ecs->GetComponent<ZeroTransform>(entity);
+        arr->SetValue(0, &t.position.x);
+        arr->SetValue(1, &t.position.y);
+        arr->SetValue(2, &t.position.z);
     }
 
-    auto& transform = ecs->GetComponent<ZeroTransform>(entity);
-    wrenEnsureSlots(vm, 4);
-    wrenSetSlotNewList(vm, 0);
-    wrenSetSlotDouble(vm, 1, transform.position.x);
-    wrenInsertInList(vm, 0, -1, 1);
-    wrenSetSlotDouble(vm, 1, transform.position.y);
-    wrenInsertInList(vm, 0, -1, 1);
-    wrenSetSlotDouble(vm, 1, transform.position.z);
-    wrenInsertInList(vm, 0, -1, 1);
+    return arr;
 }
 
-void ScriptingEngine::API_SetPosition(WrenVM* vm) {
+void ScriptingEngine::API_Entity_SetPosition(float x, float y, float z) {
     ScriptingEngine& engine = ScriptingEngine::Instance();
     Entity entity = engine.GetCurrentEntity();
     ECS* ecs = engine.GetCurrentECS();
 
-    if (!ecs || entity == INVALID_ENTITY || !ecs->HasComponent<ZeroTransform>(entity)) return;
-
-    float x = (float)wrenGetSlotDouble(vm, 1);
-    float y = (float)wrenGetSlotDouble(vm, 2);
-    float z = (float)wrenGetSlotDouble(vm, 3);
-
-    auto& transform = ecs->GetComponent<ZeroTransform>(entity);
-    transform.position = {x, y, z};
+    if (ecs && entity != INVALID_ENTITY && ecs->HasComponent<ZeroTransform>(entity)) {
+        auto& t = ecs->GetComponent<ZeroTransform>(entity);
+        t.position = {x, y, z};
+    }
 }
 
-void ScriptingEngine::API_GetVelocity(WrenVM* vm) {
+CScriptArray* ScriptingEngine::API_Entity_GetVelocity() {
     ScriptingEngine& engine = ScriptingEngine::Instance();
     Entity entity = engine.GetCurrentEntity();
     ECS* ecs = engine.GetCurrentECS();
 
-    if (!ecs || entity == INVALID_ENTITY || !ecs->HasComponent<Velocity>(entity)) {
-        wrenSetSlotNewList(vm, 0);
-        return;
+    asIScriptContext* ctx = asGetActiveContext();
+    asIScriptEngine* scriptEngine = ctx->GetEngine();
+    asITypeInfo* arrayType = scriptEngine->GetTypeInfoByDecl("array<float>");
+    CScriptArray* arr = CScriptArray::Create(arrayType, 3);
+
+    if (ecs && entity != INVALID_ENTITY && ecs->HasComponent<Velocity>(entity)) {
+        auto& v = ecs->GetComponent<Velocity>(entity);
+        arr->SetValue(0, &v.v.x);
+        arr->SetValue(1, &v.v.y);
+        arr->SetValue(2, &v.v.z);
     }
 
-    auto& vel = ecs->GetComponent<Velocity>(entity);
-    wrenEnsureSlots(vm, 4);
-    wrenSetSlotNewList(vm, 0);
-    wrenSetSlotDouble(vm, 1, vel.v.x);
-    wrenInsertInList(vm, 0, -1, 1);
-    wrenSetSlotDouble(vm, 1, vel.v.y);
-    wrenInsertInList(vm, 0, -1, 1);
-    wrenSetSlotDouble(vm, 1, vel.v.z);
-    wrenInsertInList(vm, 0, -1, 1);
+    return arr;
 }
 
-void ScriptingEngine::API_SetVelocity(WrenVM* vm) {
+void ScriptingEngine::API_Entity_SetVelocity(float x, float y, float z) {
     ScriptingEngine& engine = ScriptingEngine::Instance();
     Entity entity = engine.GetCurrentEntity();
     ECS* ecs = engine.GetCurrentECS();
 
-    if (!ecs || entity == INVALID_ENTITY || !ecs->HasComponent<Velocity>(entity)) return;
-
-    float x = (float)wrenGetSlotDouble(vm, 1);
-    float y = (float)wrenGetSlotDouble(vm, 2);
-    float z = (float)wrenGetSlotDouble(vm, 3);
-
-    auto& vel = ecs->GetComponent<Velocity>(entity);
-    vel.v = {x, y, z};
+    if (ecs && entity != INVALID_ENTITY && ecs->HasComponent<Velocity>(entity)) {
+        auto& v = ecs->GetComponent<Velocity>(entity);
+        v.v = {x, y, z};
+    }
 }
 
-void ScriptingEngine::API_GetRotation(WrenVM* vm) {
+CScriptArray* ScriptingEngine::API_Entity_GetRotation() {
     ScriptingEngine& engine = ScriptingEngine::Instance();
     Entity entity = engine.GetCurrentEntity();
     ECS* ecs = engine.GetCurrentECS();
 
-    if (!ecs || entity == INVALID_ENTITY || !ecs->HasComponent<ZeroTransform>(entity)) {
-        wrenSetSlotNewList(vm, 0);
-        return;
+    asIScriptContext* ctx = asGetActiveContext();
+    asIScriptEngine* scriptEngine = ctx->GetEngine();
+    asITypeInfo* arrayType = scriptEngine->GetTypeInfoByDecl("array<float>");
+    CScriptArray* arr = CScriptArray::Create(arrayType, 3);
+
+    if (ecs && entity != INVALID_ENTITY && ecs->HasComponent<ZeroTransform>(entity)) {
+        auto& t = ecs->GetComponent<ZeroTransform>(entity);
+        arr->SetValue(0, &t.rotation.x);
+        arr->SetValue(1, &t.rotation.y);
+        arr->SetValue(2, &t.rotation.z);
     }
 
-    auto& transform = ecs->GetComponent<ZeroTransform>(entity);
-    wrenEnsureSlots(vm, 4);
-    wrenSetSlotNewList(vm, 0);
-    wrenSetSlotDouble(vm, 1, transform.rotation.x);
-    wrenInsertInList(vm, 0, -1, 1);
-    wrenSetSlotDouble(vm, 1, transform.rotation.y);
-    wrenInsertInList(vm, 0, -1, 1);
-    wrenSetSlotDouble(vm, 1, transform.rotation.z);
-    wrenInsertInList(vm, 0, -1, 1);
+    return arr;
 }
 
-void ScriptingEngine::API_SetRotation(WrenVM* vm) {
+void ScriptingEngine::API_Entity_SetRotation(float x, float y, float z) {
     ScriptingEngine& engine = ScriptingEngine::Instance();
     Entity entity = engine.GetCurrentEntity();
     ECS* ecs = engine.GetCurrentECS();
 
-    if (!ecs || entity == INVALID_ENTITY || !ecs->HasComponent<ZeroTransform>(entity)) return;
-
-    float x = (float)wrenGetSlotDouble(vm, 1);
-    float y = (float)wrenGetSlotDouble(vm, 2);
-    float z = (float)wrenGetSlotDouble(vm, 3);
-
-    auto& transform = ecs->GetComponent<ZeroTransform>(entity);
-    transform.rotation = {x, y, z};
+    if (ecs && entity != INVALID_ENTITY && ecs->HasComponent<ZeroTransform>(entity)) {
+        auto& t = ecs->GetComponent<ZeroTransform>(entity);
+        t.rotation = {x, y, z};
+    }
 }
 
-void ScriptingEngine::API_GetScale(WrenVM* vm) {
+CScriptArray* ScriptingEngine::API_Entity_GetScale() {
     ScriptingEngine& engine = ScriptingEngine::Instance();
     Entity entity = engine.GetCurrentEntity();
     ECS* ecs = engine.GetCurrentECS();
 
-    if (!ecs || entity == INVALID_ENTITY || !ecs->HasComponent<ZeroTransform>(entity)) {
-        wrenSetSlotNewList(vm, 0);
-        return;
+    asIScriptContext* ctx = asGetActiveContext();
+    asIScriptEngine* scriptEngine = ctx->GetEngine();
+    asITypeInfo* arrayType = scriptEngine->GetTypeInfoByDecl("array<float>");
+    CScriptArray* arr = CScriptArray::Create(arrayType, 3);
+
+    if (ecs && entity != INVALID_ENTITY && ecs->HasComponent<ZeroTransform>(entity)) {
+        auto& t = ecs->GetComponent<ZeroTransform>(entity);
+        arr->SetValue(0, &t.scale.x);
+        arr->SetValue(1, &t.scale.y);
+        arr->SetValue(2, &t.scale.z);
     }
 
-    auto& transform = ecs->GetComponent<ZeroTransform>(entity);
-    wrenEnsureSlots(vm, 4);
-    wrenSetSlotNewList(vm, 0);
-    wrenSetSlotDouble(vm, 1, transform.scale.x);
-    wrenInsertInList(vm, 0, -1, 1);
-    wrenSetSlotDouble(vm, 1, transform.scale.y);
-    wrenInsertInList(vm, 0, -1, 1);
-    wrenSetSlotDouble(vm, 1, transform.scale.z);
-    wrenInsertInList(vm, 0, -1, 1);
+    return arr;
 }
 
-void ScriptingEngine::API_SetScale(WrenVM* vm) {
+void ScriptingEngine::API_Entity_SetScale(float x, float y, float z) {
     ScriptingEngine& engine = ScriptingEngine::Instance();
     Entity entity = engine.GetCurrentEntity();
     ECS* ecs = engine.GetCurrentECS();
 
-    if (!ecs || entity == INVALID_ENTITY || !ecs->HasComponent<ZeroTransform>(entity)) return;
-
-    float x = (float)wrenGetSlotDouble(vm, 1);
-    float y = (float)wrenGetSlotDouble(vm, 2);
-    float z = (float)wrenGetSlotDouble(vm, 3);
-
-    auto& transform = ecs->GetComponent<ZeroTransform>(entity);
-    transform.scale = {x, y, z};
+    if (ecs && entity != INVALID_ENTITY && ecs->HasComponent<ZeroTransform>(entity)) {
+        auto& t = ecs->GetComponent<ZeroTransform>(entity);
+        t.scale = {x, y, z};
+    }
 }
 
-void ScriptingEngine::API_DestroyEntity(WrenVM* vm) {
-    (void)vm;
+void ScriptingEngine::API_Entity_Destroy() {
     ScriptingEngine& engine = ScriptingEngine::Instance();
     Entity entity = engine.GetCurrentEntity();
     ECS* ecs = engine.GetCurrentECS();
@@ -655,188 +529,91 @@ void ScriptingEngine::API_DestroyEntity(WrenVM* vm) {
     }
 }
 
-void ScriptingEngine::API_GetEntityId(WrenVM* vm) {
+int ScriptingEngine::API_Entity_GetId() {
     ScriptingEngine& engine = ScriptingEngine::Instance();
-    Entity entity = engine.GetCurrentEntity();
-    wrenSetSlotDouble(vm, 0, (double)entity);
+    return static_cast<int>(engine.GetCurrentEntity());
 }
 
 // ============================================================================
-// Foreign Method Implementations - Input API
+// API Implementation - Input
 // ============================================================================
 
-void ScriptingEngine::API_IsKeyDown(WrenVM* vm) {
-    int key = (int)wrenGetSlotDouble(vm, 1);
-    bool isDown = IsKeyDown(key);
-    wrenSetSlotBool(vm, 0, isDown);
+bool ScriptingEngine::API_Input_IsKeyDown(int key) {
+    return IsKeyDown(key);
 }
 
-void ScriptingEngine::API_IsKeyPressed(WrenVM* vm) {
-    int key = (int)wrenGetSlotDouble(vm, 1);
-    bool isPressed = IsKeyPressed(key);
-    wrenSetSlotBool(vm, 0, isPressed);
+bool ScriptingEngine::API_Input_IsKeyPressed(int key) {
+    return IsKeyPressed(key);
 }
 
-void ScriptingEngine::API_IsKeyReleased(WrenVM* vm) {
-    int key = (int)wrenGetSlotDouble(vm, 1);
-    bool isReleased = IsKeyReleased(key);
-    wrenSetSlotBool(vm, 0, isReleased);
+bool ScriptingEngine::API_Input_IsKeyReleased(int key) {
+    return IsKeyReleased(key);
 }
 
-void ScriptingEngine::API_IsMouseButtonDown(WrenVM* vm) {
-    int button = (int)wrenGetSlotDouble(vm, 1);
-    bool isDown = IsMouseButtonDown(button);
-    wrenSetSlotBool(vm, 0, isDown);
+bool ScriptingEngine::API_Input_IsMouseButtonDown(int button) {
+    return IsMouseButtonDown(button);
 }
 
-void ScriptingEngine::API_IsMouseButtonPressed(WrenVM* vm) {
-    int button = (int)wrenGetSlotDouble(vm, 1);
-    bool isPressed = IsMouseButtonPressed(button);
-    wrenSetSlotBool(vm, 0, isPressed);
+bool ScriptingEngine::API_Input_IsMouseButtonPressed(int button) {
+    return IsMouseButtonPressed(button);
 }
 
-void ScriptingEngine::API_GetMousePosition(WrenVM* vm) {
+CScriptArray* ScriptingEngine::API_Input_GetMousePosition() {
     Vector2 pos = GetMousePosition();
-    wrenEnsureSlots(vm, 3);
-    wrenSetSlotNewList(vm, 0);
-    wrenSetSlotDouble(vm, 1, pos.x);
-    wrenInsertInList(vm, 0, -1, 1);
-    wrenSetSlotDouble(vm, 1, pos.y);
-    wrenInsertInList(vm, 0, -1, 1);
+    
+    asIScriptContext* ctx = asGetActiveContext();
+    asIScriptEngine* engine = ctx->GetEngine();
+    asITypeInfo* arrayType = engine->GetTypeInfoByDecl("array<float>");
+    CScriptArray* arr = CScriptArray::Create(arrayType, 2);
+    
+    arr->SetValue(0, &pos.x);
+    arr->SetValue(1, &pos.y);
+    
+    return arr;
 }
 
-void ScriptingEngine::API_GetMouseDelta(WrenVM* vm) {
+CScriptArray* ScriptingEngine::API_Input_GetMouseDelta() {
     Vector2 delta = GetMouseDelta();
-    wrenEnsureSlots(vm, 3);
-    wrenSetSlotNewList(vm, 0);
-    wrenSetSlotDouble(vm, 1, delta.x);
-    wrenInsertInList(vm, 0, -1, 1);
-    wrenSetSlotDouble(vm, 1, delta.y);
-    wrenInsertInList(vm, 0, -1, 1);
+    
+    asIScriptContext* ctx = asGetActiveContext();
+    asIScriptEngine* engine = ctx->GetEngine();
+    asITypeInfo* arrayType = engine->GetTypeInfoByDecl("array<float>");
+    CScriptArray* arr = CScriptArray::Create(arrayType, 2);
+    
+    arr->SetValue(0, &delta.x);
+    arr->SetValue(1, &delta.y);
+    
+    return arr;
 }
 
 // ============================================================================
-// Foreign Method Implementations - Time API
+// API Implementation - Time
 // ============================================================================
 
-void ScriptingEngine::API_GetDeltaTime(WrenVM* vm) {
-    float dt = GetFrameTime();
-    wrenSetSlotDouble(vm, 0, dt);
+float ScriptingEngine::API_Time_GetDeltaTime() {
+    return GetFrameTime();
 }
 
-void ScriptingEngine::API_GetTime(WrenVM* vm) {
-    double time = GetTime();
-    wrenSetSlotDouble(vm, 0, time);
+double ScriptingEngine::API_Time_GetTime() {
+    return GetTime();
 }
 
-void ScriptingEngine::API_GetFPS(WrenVM* vm) {
-    int fps = GetFPS();
-    wrenSetSlotDouble(vm, 0, fps);
+int ScriptingEngine::API_Time_GetFPS() {
+    return GetFPS();
 }
 
 // ============================================================================
-// Foreign Method Implementations - Math API
+// API Implementation - Debug
 // ============================================================================
 
-void ScriptingEngine::API_Sin(WrenVM* vm) {
-    double angle = wrenGetSlotDouble(vm, 1);
-    wrenSetSlotDouble(vm, 0, sin(angle));
+void ScriptingEngine::API_Debug_Log(const std::string& message) {
+    LOG_INFO(message);
 }
 
-void ScriptingEngine::API_Cos(WrenVM* vm) {
-    double angle = wrenGetSlotDouble(vm, 1);
-    wrenSetSlotDouble(vm, 0, cos(angle));
+void ScriptingEngine::API_Debug_DrawLine(float x1, float y1, float z1, float x2, float y2, float z2) {
+    DrawLine3D({x1, y1, z1}, {x2, y2, z2}, RED);
 }
 
-void ScriptingEngine::API_Tan(WrenVM* vm) {
-    double angle = wrenGetSlotDouble(vm, 1);
-    wrenSetSlotDouble(vm, 0, tan(angle));
+void ScriptingEngine::API_Debug_DrawSphere(float x, float y, float z, float radius) {
+    DrawSphere({x, y, z}, radius, RED);
 }
-
-void ScriptingEngine::API_Sqrt(WrenVM* vm) {
-    double value = wrenGetSlotDouble(vm, 1);
-    wrenSetSlotDouble(vm, 0, sqrt(value));
-}
-
-void ScriptingEngine::API_Abs(WrenVM* vm) {
-    double value = wrenGetSlotDouble(vm, 1);
-    wrenSetSlotDouble(vm, 0, fabs(value));
-}
-
-
-void ScriptingEngine::API_Pow(WrenVM* vm) {
-    double base = wrenGetSlotDouble(vm, 1);
-    double exponent = wrenGetSlotDouble(vm, 2);
-    wrenSetSlotDouble(vm, 0, std::pow(base, exponent));
-}
-
-
-void ScriptingEngine::API_Lerp(WrenVM* vm) {
-    double a = wrenGetSlotDouble(vm, 1);
-    double b = wrenGetSlotDouble(vm, 2);
-    double t = wrenGetSlotDouble(vm, 3);
-
-    wrenSetSlotDouble(vm, 0, a + (b - a) * t);
-}
-
-void ScriptingEngine::API_Clamp(WrenVM* vm) {
-    double value = wrenGetSlotDouble(vm, 1);
-    double minv  = wrenGetSlotDouble(vm, 2);
-    double maxv  = wrenGetSlotDouble(vm, 3);
-
-    if (value < minv) value = minv;
-    if (value > maxv) value = maxv;
-
-    wrenSetSlotDouble(vm, 0, value);
-}
-
-void ScriptingEngine::API_Radians(WrenVM* vm) {
-    double deg = wrenGetSlotDouble(vm, 1);
-    wrenSetSlotDouble(vm, 0, deg * (PI / 180.0));
-}
-
-void ScriptingEngine::API_Degrees(WrenVM* vm) {
-    double rad = wrenGetSlotDouble(vm, 1);
-    wrenSetSlotDouble(vm, 0, rad * (180.0 / PI));
-}
-
-void ScriptingEngine::API_DebugLog(WrenVM* vm) {
-    WrenType t = wrenGetSlotType(vm, 1);
-
-    switch (t) {
-        case WREN_TYPE_STRING:
-            LOG_INFO(std::string(wrenGetSlotString(vm, 1)));
-            break;
-        case WREN_TYPE_NUM:
-             LOG_INFO(std::to_string(wrenGetSlotDouble(vm, 1)));
-            break;
-        default:
-            LOG_INFO("<non-printable type to DebugLog>");
-            break;
-    }
-}
-
-void ScriptingEngine::API_DebugDrawLine(WrenVM* vm) {
-    float x1 = (float)wrenGetSlotDouble(vm, 1);
-    float y1 = (float)wrenGetSlotDouble(vm, 2);
-    float z1 = (float)wrenGetSlotDouble(vm, 3);
-
-    float x2 = (float)wrenGetSlotDouble(vm, 4);
-    float y2 = (float)wrenGetSlotDouble(vm, 5);
-    float z2 = (float)wrenGetSlotDouble(vm, 6);
-
-    //DebugRenderer::DrawLine({x1, y1, z1}, {x2, y2, z2});
-}
-
-void ScriptingEngine::API_DebugDrawSphere(WrenVM* vm) {
-    float x = (float)wrenGetSlotDouble(vm, 1);
-    float y = (float)wrenGetSlotDouble(vm, 2);
-    float z = (float)wrenGetSlotDouble(vm, 3);
-
-    float r = (float)wrenGetSlotDouble(vm, 4);
-
-    //DebugRenderer::DrawSphere({x, y, z}, r);
-}
-
-
-

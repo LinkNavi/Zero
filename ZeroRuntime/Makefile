@@ -1,7 +1,6 @@
-
 CXX = g++
-CXXFLAGS = -Wall -Wextra -Wpedantic -Iinclude -I../ZeroEngine/include
-LDFLAGS = -lraylib -lwren
+CXXFLAGS = -Wall -Wextra -Wpedantic -Iinclude -I../ZeroEngine/include -std=c++17
+LIBS = -lraylib -langelscript -lGL -lm -lpthread -ldl -lrt -lX11
 
 SRC_DIR = src
 
@@ -15,10 +14,12 @@ OUT = ZeroRuntime
 all: $(OUT)
 
 $(OUT): $(OBJS) $(ENGINE_LIB)
-	$(CXX) $(OBJS) $(ENGINE_LIB) $(LDFLAGS) -o $(OUT)
+	$(CXX) -o $(OUT) $(OBJS) $(ENGINE_LIB) $(LIBS)
 
 %.o: %.cpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 clean:
 	rm -f $(OBJS) $(OUT)
+
+.PHONY: all clean

@@ -6,22 +6,22 @@
 int main(int argc, char* argv[]) {
     // Initialize logging system
     Logger::Instance().Init("zero_engine.log", LogLevel::DEBUG);
-    LOG_INFO("=== ZeroEngine Starting with Wren Scripting ===");
+    LOG_INFO("=== ZeroEngine Starting with AngelScript Scripting ===");
 
     try {
         const int WINDOW_WIDTH = 1280;
         const int WINDOW_HEIGHT = 720;
 
         World world;
-        world.Init(WINDOW_WIDTH, WINDOW_HEIGHT, "ZeroEngine - Wren Scripting Demo");
+        world.Init(WINDOW_WIDTH, WINDOW_HEIGHT, "ZeroEngine - AngelScript Demo");
 
         // Create initial scene
         LOG_INFO("Creating initial scene...");
         
-        // Create scripted player (uses Player.wren script)
+        // Create scripted player (uses Player.as script)
         Entity player = world.CreateScriptedCube(
             {0, 1, 0},
-            "scripts/Player.wren",
+            "scripts/Player.as",
             "Player",
             BLUE
         );
@@ -32,21 +32,21 @@ int main(int argc, char* argv[]) {
         // Create some scripted entities
         Entity rotatingCube = world.CreateScriptedCube(
             {5, 1, 0},
-            "scripts/RotatingCube.wren",
+            "scripts/RotatingCube.as",
             "RotatingCube",
             RED
         );
 
         Entity orbiter = world.CreateScriptedCube(
             {0, 1, 5},
-            "scripts/Orbiter.wren",
+            "scripts/Orbiter.as",
             "Orbiter",
             GREEN
         );
 
         Entity follower = world.CreateScriptedCube(
             {-5, 1, 0},
-            "scripts/Follower.wren",
+            "scripts/Follower.as",
             "Follower",
             YELLOW
         );
@@ -54,7 +54,7 @@ int main(int argc, char* argv[]) {
         // Create a cube that will self-destruct
         Entity selfDestruct = world.CreateScriptedCube(
             {0, 1, -5},
-            "scripts/SelfDestruct.wren",
+            "scripts/SelfDestruct.as",
             "SelfDestruct",
             PURPLE
         );
@@ -67,7 +67,7 @@ int main(int argc, char* argv[]) {
 
         LOG_INFO("Scene creation complete");
         LOG_INFO("=== Controls ===");
-        LOG_INFO("WASD - Move Player (controlled by Player.wren script)");
+        LOG_INFO("WASD - Move Player (controlled by Player.as script)");
         LOG_INFO("Space - Jump");
         LOG_INFO("F3 - Toggle Debug");
         LOG_INFO("F5 - Save Scene");
@@ -76,11 +76,11 @@ int main(int argc, char* argv[]) {
         LOG_INFO("ESC - Quit");
         LOG_INFO("");
         LOG_INFO("=== Active Scripts ===");
-        LOG_INFO("Player.wren - Blue cube, player movement");
-        LOG_INFO("RotatingCube.wren - Red cube, bobbing animation");
-        LOG_INFO("Orbiter.wren - Green cube, orbital movement");
-        LOG_INFO("Follower.wren - Yellow cube, follows origin");
-        LOG_INFO("SelfDestruct.wren - Purple cube, destroys after 5 seconds");
+        LOG_INFO("Player.as - Blue cube, player movement");
+        LOG_INFO("RotatingCube.as - Red cube, bobbing animation");
+        LOG_INFO("Orbiter.as - Green cube, orbital movement");
+        LOG_INFO("Follower.as - Yellow cube, follows origin");
+        LOG_INFO("SelfDestruct.as - Purple cube, destroys after 5 seconds");
 
         SetTargetFPS(60);
 
@@ -106,7 +106,7 @@ int main(int argc, char* argv[]) {
             }
 
             // Instructions overlay
-            DrawText("WASD to move player (via script)", 10, WINDOW_HEIGHT - 60, 20, BLACK);
+            DrawText("WASD to move player (via AngelScript)", 10, WINDOW_HEIGHT - 60, 20, BLACK);
             DrawText("Watch the scripted cubes interact!", 10, WINDOW_HEIGHT - 35, 20, BLACK);
 
             EndDrawing();
