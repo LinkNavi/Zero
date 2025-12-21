@@ -1,4 +1,4 @@
-// FollowCamera.mg - Camera that follows a target
+// FollowCamera.mg - Camera that follows the player
 
 class FollowCamera {
     // Target offset
@@ -9,12 +9,13 @@ class FollowCamera {
     // Smooth follow speed
     let f32 smoothSpeed = 5.0;
     
-    // Target position (set by engine)
-    let f32 targetX = 0.0;
-    let f32 targetY = 0.0;
-    let f32 targetZ = 0.0;
-    
     void fn OnUpdate() {
+        // Get player position (auto-bound by engine)
+	
+        let f32 targetX = player_x;
+        let f32 targetY = player_y;
+        let f32 targetZ = player_z;
+        
         // Calculate desired position
         let f32 desiredX = targetX + offsetX;
         let f32 desiredY = targetY + offsetY;

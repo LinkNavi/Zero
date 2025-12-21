@@ -60,7 +60,7 @@ namespace EngineCore.Scripting
             _interface.RegisterVariable("position_x", () => transform.position.x, v =>
             {
                 var pos = transform.position;
-                 pos.x = (float)v;
+                pos.x = (float)v;
                 transform.position = pos;
             });
             _interface.RegisterVariable("position_y", () => transform.position.y, v =>
@@ -280,13 +280,53 @@ namespace EngineCore.Scripting
                 gameObject.activeSelf = v > 0.5;
             });
 
-
             _interface.RegisterFunction("Destroy", (double[] args) =>
             {
                 gameObject.Destroy();
                 return 0;
             });
 
+            // ADD THESE NEW FUNCTIONS:
+            // Store found object positions for scripts to access
+            Dictionary<string, GameObject> _foundObjects = new Dictionary<string, GameObject>();
+
+            _interface.RegisterFunction("FindByName", (args) =>
+            {
+                if (args.Length > 0)
+                {
+                    string name = ((int)args[0]).ToString(); // Workaround: pass name hash or index
+                                                             // For now, hardcode common names
+                    GameObject found = null;
+                    if (args[0] == 0) found = GameObject.Find("Player");
+                    else if (args[0] == 1) found = GameObject.Find("Enemy");
+
+                    if (found != null)
+                    {
+                        _foundObjects["last_found"] = found;
+                        return 1; // Found
+                    }
+                }
+                return 0; // Not found
+            });
+
+            // Better approach: Pre-register common object positions
+            var player = GameObject.Find("Player");
+            if (player != null)
+            {
+                _interface.RegisterVariable("player_x", () => player.transform.position.x);
+                _interface.RegisterVariable("player_y", () => player.transform.position.y);
+                _interface.RegisterVariable("player_z", () => player.transform.position.z);
+                _interface.RegisterVariable("player_active", () => player.activeSelf ? 1.0 : 0.0);
+            }
+
+            var enemy = GameObject.Find("Enemy");
+            if (enemy != null)
+            {
+                _interface.RegisterVariable("enemy_x", () => enemy.transform.position.x);
+                _interface.RegisterVariable("enemy_y", () => enemy.transform.position.y);
+                _interface.RegisterVariable("enemy_z", () => enemy.transform.position.z);
+                _interface.RegisterVariable("enemy_active", () => enemy.activeSelf ? 1.0 : 0.0);
+            }
         }
 
         private void BindGameObject()
