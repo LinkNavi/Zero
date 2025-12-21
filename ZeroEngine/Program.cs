@@ -17,7 +17,7 @@ using ECSVector3 = EngineCore.ECS.Vector3;
 namespace EngineRuntime
 {
     // ==================== SCRIPT-DRIVEN PLAYER ====================
-    
+
     /// <summary>
     /// Example class that exposes properties to scripts via attributes
     /// </summary>
@@ -25,19 +25,19 @@ namespace EngineRuntime
     {
         [ScriptVariable("health")]
         public float Health = 100f;
-        
+
         [ScriptVariable("max_health", readOnly: true)]
         public float MaxHealth = 100f;
-        
+
         [ScriptVariable("speed")]
         public float MoveSpeed = 5f;
-        
+
         [ScriptVariable("jump_force")]
         public float JumpForce = 8f;
-        
+
         [ScriptVariable("is_grounded")]
         public bool IsGrounded = true;
-        
+
         [ScriptCallable("take_damage")]
         public float TakeDamage(float amount)
         {
@@ -45,14 +45,14 @@ namespace EngineRuntime
             Console.WriteLine($"Player took {amount} damage! Health: {Health}");
             return Health;
         }
-        
+
         [ScriptCallable("heal")]
         public float Heal(float amount)
         {
             Health = Math.Min(MaxHealth, Health + amount);
             return Health;
         }
-        
+
         [ScriptCallable("is_alive")]
         public bool IsAlive() => Health > 0;
     }
@@ -69,13 +69,13 @@ namespace EngineRuntime
         protected override void LateUpdate()
         {
             if (target == null) return;
-            
+
             ECSVector3 desiredPosition = new ECSVector3(
                 target.position.x + offset.x,
                 target.position.y + offset.y,
                 target.position.z + offset.z
             );
-            
+
             ECSVector3 currentPos = transform.position;
             transform.position = Vector3Extensions.Lerp(currentPos, desiredPosition, smoothSpeed * Time.DeltaTime);
             transform.LookAt(target.position);
@@ -89,7 +89,7 @@ namespace EngineRuntime
         private Game _game;
         private Shader _defaultShader;
         private Mesh _cubeMesh;
-        
+        private float _playerVelocityY = 0;
         // Script-related
         private PlayerStats _playerStats;
         private ScriptComponent _playerScript;
@@ -118,7 +118,18 @@ namespace EngineRuntime
 
             // Initialize systems
             Input.Initialize();
-            AudioSystem.Initialize();
+
+            // Try to initialize audio, but don't crash if it fails
+            try
+            {
+                AudioSystem.Initialize();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Warning: Audio system could not be initialized: {ex.Message}");
+                Console.WriteLine("Continuing without audio...");
+            }
+
             Debug.Initialize();
 
             // Create resources
@@ -129,11 +140,11 @@ namespace EngineRuntime
             // Initialize game
             _game = new Game();
             _game.Initialize();
-            
+
             // Create scripts directory if needed
             Directory.CreateDirectory("Scripts");
             CreateExampleScripts();
-            
+
             SetupScene();
 
             Console.WriteLine("\n=== Initialization Complete ===");
@@ -147,10 +158,10 @@ namespace EngineRuntime
             Console.WriteLine();
         }
 
-        private void CreateExampleScripts()
-        {
-            // Player controller script
-            string playerScript = @"// player_controller.mg - Player movement script
+       private void CreateExampleScripts()
+{
+    // Player controller script - using set_position
+    string playerScript = @"// player_controller.mg - Player movement script
 
 void fn on_start() {
     log(""Player script started!"");
@@ -164,11 +175,15 @@ void fn on_update() {
     let f32 h = input_h;
     let f32 v = input_v;
     
-    // Move
-    if (abs(h) > 0.1 || abs(v) > 0.1) {
-        pos_x = pos_x + h * spd * dt;
-        pos_z = pos_z + v * spd * dt;
-    }
+    // Get current position
+    let f32 cur_x = pos_x;
+    let f32 cur_y = pos_y;
+    let f32 cur_z = pos_z;
+    
+    // Calculate new position based on input
+    let f32 new_x = cur_x + h * spd * dt;
+    let f32 new_z = cur_z + v * spd * dt;
+    let f32 new_y = cur_y;
     
     // Jump
     if (input_jump > 0.5 && is_grounded > 0.5) {
@@ -179,21 +194,18 @@ void fn on_update() {
     // Apply gravity
     if (is_grounded < 0.5) {
         velocity_y = velocity_y - 20.0 * dt;
-        pos_y = pos_y + velocity_y * dt;
+        new_y = cur_y + velocity_y * dt;
     }
     
     // Ground check
-    if (pos_y <= 0.5) {
-        pos_y = 0.5;
+    if (new_y <= 0.5) {
+        new_y = 0.5;
         velocity_y = 0.0;
         is_grounded = 1.0;
     }
     
-    // Rotate based on movement
-    if (abs(h) > 0.1 || abs(v) > 0.1) {
-        let f32 target_rot = atan2(h, v) * 57.2958;
-        rotate(0.0, target_rot * dt * 5.0, 0.0);
-    }
+    // Update position using set_position function
+    set_position(new_x, new_y, new_z);
 }
 
 void fn on_destroy() {
@@ -201,8 +213,8 @@ void fn on_destroy() {
 }
 ";
 
-            // Enemy AI script
-            string enemyScript = @"// enemy_ai.mg - Simple enemy AI
+    // Enemy AI script - using set_position
+    string enemyScript = @"// enemy_ai.mg - Simple enemy AI
 
 let f32 state = 0.0;  // 0=idle, 1=chase, 2=attack
 let f32 timer = 0.0;
@@ -219,14 +231,18 @@ void fn on_update() {
     timer = timer + dt;
     
     // Calculate distance to player
-    let f32 dx = player_x - pos_x;
-    let f32 dz = player_z - pos_z;
-    let f32 dist = sqrt(dx * dx + dz * dz);
+    let f32 dist = player_distance;
+    
+    // Get current position
+    let f32 my_x = pos_x;
+    let f32 my_y = pos_y;
+    let f32 my_z = pos_z;
     
     // State machine
     if (state < 0.5) {
         // Idle - bob up and down
-        pos_y = 1.0 + sin(total_time * 2.0) * 0.2;
+        let f32 new_y = 0.5 + sin(total_time * 2.0) * 0.2;
+        set_position(my_x, new_y, my_z);
         
         // Check for player
         if (dist < detect_range) {
@@ -235,11 +251,15 @@ void fn on_update() {
         }
     } elif (state < 1.5) {
         // Chase
+        let f32 dx = player_x - my_x;
+        let f32 dz = player_z - my_z;
+        
         if (dist > 0.1) {
             let f32 nx = dx / dist;
             let f32 nz = dz / dist;
-            pos_x = pos_x + nx * move_speed * dt;
-            pos_z = pos_z + nz * move_speed * dt;
+            let f32 new_x = my_x + nx * move_speed * dt;
+            let f32 new_z = my_z + nz * move_speed * dt;
+            set_position(new_x, my_y, new_z);
         }
         
         // Attack if close
@@ -257,7 +277,6 @@ void fn on_update() {
         // Attack
         if (timer > 1.0) {
             log(""Enemy attacks!"");
-            // Could call damage function here
             timer = 0.0;
         }
         
@@ -276,172 +295,192 @@ void fn on_destroy() {
 }
 ";
 
-            File.WriteAllText("Scripts/player_controller.mg", playerScript);
-            File.WriteAllText("Scripts/enemy_ai.mg", enemyScript);
-            Console.WriteLine("Created example scripts in Scripts/");
-        }
-
+    File.WriteAllText("Scripts/player_controller.mg", playerScript);
+    File.WriteAllText("Scripts/enemy_ai.mg", enemyScript);
+    Console.WriteLine("Created example scripts in Scripts/");
+}
         private void SetupScene()
         {
             var scene = _game.Scene;
+            Debug.Log("Creating scene...");
 
-            // Camera
+            // Camera (needed to see anything)
             var cameraGO = scene.CreateGameObject("Main Camera");
             cameraGO.tag = "MainCamera";
             var camera = cameraGO.AddComponent<CameraComponent>();
             camera.fieldOfView = 60f;
             camera.backgroundColor = new Color4(0.2f, 0.3f, 0.4f, 1.0f);
             cameraGO.transform.position = new ECSVector3(0, 8, 12);
-            
+
             var camController = cameraGO.AddComponent<CameraController>();
             camController.offset = new ECSVector3(0, 8, 12);
+            Debug.Log("Camera created");
 
-            // Ground
+            // Ground (needed for reference, but no script)
             var ground = scene.CreateGameObject("Ground");
             ground.transform.position = new ECSVector3(0, -0.5f, 0);
             ground.transform.localScale = new ECSVector3(30, 1, 30);
             var groundRenderer = ground.AddComponent<MeshRenderer>();
             groundRenderer.mesh = _cubeMesh;
             groundRenderer.material = new Material(_defaultShader) { Color = new Vector4(0.3f, 0.5f, 0.3f, 1.0f) };
+            Debug.Log("Ground created");
 
-            // Player with script
+            // Player with script (ONLY OBJECT WITH SCRIPT #1)
             _player = scene.CreateGameObject("Player");
             _player.transform.position = new ECSVector3(0, 0.5f, 0);
-            
+
             var playerRenderer = _player.AddComponent<MeshRenderer>();
             playerRenderer.mesh = _cubeMesh;
             playerRenderer.material = new Material(_defaultShader) { Color = new Vector4(0.2f, 0.6f, 1.0f, 1.0f) };
-            
+            Debug.Log("Player GameObject created");
+
             // Setup player script with custom bindings
             _playerStats = new PlayerStats();
             _playerScript = _player.AddComponent<ScriptComponent>();
             _playerScript.ScriptPath = "Scripts/player_controller.mg";
-            
+            Debug.Log("Player script component added");
+
             _playerScript.Configure(iface =>
             {
+                Debug.Log("Configuring player script...");
+
                 // Bind PlayerStats object (auto-binds all [ScriptVariable] and [ScriptCallable])
                 iface.BindObject("", _playerStats);
-                
-                // Custom input variables
-                float velocityY = 0;
-                iface.RegisterVariable("velocity_y", () => velocityY, v => velocityY = (float)v);
+
+                // Custom velocity variable that persists
+                iface.RegisterVariable("velocity_y",
+                    () => _playerVelocityY,
+                    v => _playerVelocityY = (float)v);
+
+                // Input variables
                 iface.RegisterVariable("input_h", () => Input.GetAxisHorizontal());
                 iface.RegisterVariable("input_v", () => Input.GetAxisVertical());
                 iface.RegisterVariable("input_jump", () => Input.GetKeyDown(KeyCode.Space) ? 1.0 : 0.0);
-                
+
                 // Log callback
                 iface.OnLog = msg => Debug.Log($"[Player] {msg}");
-            });
-            
-            camController.target = _player.transform;
 
-            // Enemy with script
+                Debug.Log("Player script configured");
+            });
+
+            camController.target = _player.transform;
+            Debug.Log("Player setup complete");
+
+            // Enemy with script (ONLY OBJECT WITH SCRIPT #2)
             _enemy = scene.CreateGameObject("Enemy");
             _enemy.transform.position = new ECSVector3(5, 1, 5);
-            
+
             var enemyRenderer = _enemy.AddComponent<MeshRenderer>();
             enemyRenderer.mesh = _cubeMesh;
             enemyRenderer.material = new Material(_defaultShader) { Color = new Vector4(1.0f, 0.3f, 0.3f, 1.0f) };
-            
+            Debug.Log("Enemy GameObject created");
+
             _enemyScript = _enemy.AddComponent<ScriptComponent>();
             _enemyScript.ScriptPath = "Scripts/enemy_ai.mg";
-            
+
             _enemyScript.Configure(iface =>
             {
+                Debug.Log("Configuring enemy script...");
+
                 // Give enemy access to player position
                 iface.RegisterVariable("player_x", () => _player.transform.position.x);
                 iface.RegisterVariable("player_y", () => _player.transform.position.y);
                 iface.RegisterVariable("player_z", () => _player.transform.position.z);
-                
+
+                // Calculate distance to player
+                iface.RegisterVariable("player_distance", () =>
+                {
+                    var dx = _player.transform.position.x - _enemy.transform.position.x;
+                    var dz = _player.transform.position.z - _enemy.transform.position.z;
+                    return Math.Sqrt(dx * dx + dz * dz);
+                });
+
                 // Enemy can damage player
-                iface.RegisterFunction("damage_player", args =>
+                ScriptFunction damageFunc = args =>
                 {
                     _playerStats.TakeDamage((float)args[0]);
                     return _playerStats.Health;
-                });
-                
-                iface.OnLog = msg => Debug.Log($"[Enemy] {msg}");
+                };
+                iface.RegisterFunction("damage_player", damageFunc);
+
+
+
+                Debug.Log("Enemy script configured");
             });
 
-            // Some decoration cubes
-            for (int i = 0; i < 5; i++)
-            {
-                var deco = scene.CreateGameObject($"Deco_{i}");
-                float angle = i * 72 * Mathf.Deg2Rad;
-                deco.transform.position = new ECSVector3(
-                    Mathf.Cos(angle) * 10,
-                    0.5f,
-                    Mathf.Sin(angle) * 10
-                );
-                var decoRenderer = deco.AddComponent<MeshRenderer>();
-                decoRenderer.mesh = _cubeMesh;
-                decoRenderer.material = new Material(_defaultShader) 
-                { 
-                    Color = new Vector4(0.5f + i * 0.1f, 0.5f, 0.8f - i * 0.1f, 1.0f) 
-                };
-            }
-
-            // Light
+            // Light (needed for visibility)
             var light = scene.CreateGameObject("Light");
             var lightComp = light.AddComponent<Light>();
             lightComp.type = Light.LightType.Directional;
             lightComp.intensity = 1.0f;
             light.transform.SetEulerAngles(-45, 45, 0);
+            Debug.Log("Light created");
 
-            Debug.Log($"Scene created with {scene.GetAllGameObjects().Length} GameObjects");
+            Debug.Log($"Scene created with 2 scripted objects (Player + Enemy)");
         }
 
-        protected override void OnUpdateFrame(FrameEventArgs args)
+       protected override void OnUpdateFrame(FrameEventArgs args)
+{
+    base.OnUpdateFrame(args);
+
+    Input.Update(KeyboardState, MouseState);
+    Time.Update((float)args.Time);
+    Debug.Update(Time.DeltaTime);
+
+    // Temporary debug - remove after testing
+    float h = Input.GetAxisHorizontal();
+    float v = Input.GetAxisVertical();
+    if (h != 0 || v != 0)
+    {
+        Console.WriteLine($"Input - H: {h:F2}, V: {v:F2} | Player pos: ({_player.transform.position.x:F2}, {_player.transform.position.y:F2}, {_player.transform.position.z:F2})");
+    }
+
+    // Exit
+    if (Input.GetKeyDown(KeyCode.Escape))
+        Close();
+
+    // Debug keys
+    if (Input.GetKeyDown(KeyCode.H))
+    {
+        _playerStats.Heal(20);
+        Debug.Log($"Healed! Health: {_playerStats.Health}");
+    }
+    
+    if (Input.GetKeyDown(KeyCode.K))
+    {
+        _playerStats.TakeDamage(10);
+    }
+    
+    if (Input.GetKeyDown(KeyCode.R))
+    {
+        ReloadScripts();
+    }
+
+    // Update game
+    _game.Update(args.Time);
+    _game.LateUpdate();
+
+    // Update audio listener (only if audio is initialized)
+    if (AudioSystem.IsInitialized)
+    {
+        var mainCam = CameraComponent.Main;
+        if (mainCam != null)
         {
-            base.OnUpdateFrame(args);
-
-            Input.Update(KeyboardState, MouseState);
-            Time.Update((float)args.Time);
-            Debug.Update(Time.DeltaTime);
-
-            // Exit
-            if (Input.GetKeyDown(KeyCode.Escape))
-                Close();
-
-            // Debug keys
-            if (Input.GetKeyDown(KeyCode.H))
-            {
-                _playerStats.Heal(20);
-                Debug.Log($"Healed! Health: {_playerStats.Health}");
-            }
-            
-            if (Input.GetKeyDown(KeyCode.K))
-            {
-                _playerStats.TakeDamage(10);
-            }
-            
-            if (Input.GetKeyDown(KeyCode.R))
-            {
-                ReloadScripts();
-            }
-
-            // Update game
-            _game.Update(args.Time);
-            _game.LateUpdate();
-
-            // Update audio listener
-            var mainCam = CameraComponent.Main;
-            if (mainCam != null)
-            {
-                AudioSystem.SetListenerPosition(mainCam.transform.position);
-                AudioSystem.SetListenerOrientation(mainCam.transform.forward, mainCam.transform.up);
-            }
-            
-            // Debug visualization
-            Debug.DrawWireBox(_player.transform.position, new ECSVector3(1, 1, 1), Color4.Cyan);
-            Debug.DrawWireBox(_enemy.transform.position, new ECSVector3(1, 1, 1), Color4.Red);
-            Debug.DrawLine(_enemy.transform.position, _player.transform.position, Color4.Yellow);
+            AudioSystem.SetListenerPosition(mainCam.transform.position);
+            AudioSystem.SetListenerOrientation(mainCam.transform.forward, mainCam.transform.up);
         }
+    }
+    
+    // Debug visualization
+    //Debug.DrawWireBox(_player.transform.position, new ECSVector3(1, 1, 1), Color4.Cyan);
+    //Debug.DrawWireBox(_enemy.transform.position, new ECSVector3(1, 1, 1), Color4.Red);
+    //Debug.DrawLine(_enemy.transform.position, _player.transform.position, Color4.Yellow);
+}
 
         private void ReloadScripts()
         {
             Debug.Log("Reloading scripts...");
-            
+
             // In a full implementation, you'd reload the ScriptComponent
             // For now just log
             Debug.Log("Scripts reloaded (hot-reload not fully implemented)");
@@ -467,6 +506,7 @@ void fn on_destroy() {
             catch (Exception ex)
             {
                 Debug.LogError($"Render error: {ex.Message}");
+                Debug.LogError($"Stack trace: {ex.StackTrace}");
             }
         }
 

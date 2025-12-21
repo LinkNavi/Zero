@@ -10,7 +10,7 @@ namespace EngineCore.Scripting
     /// Delegate for native functions callable from scripts
     /// </summary>
     public delegate double ScriptFunction(double[] args);
-    
+
     /// <summary>
     /// Attribute to mark methods as script-callable
     /// </summary>
@@ -47,7 +47,7 @@ namespace EngineCore.Scripting
         private Dictionary<string, Func<double>> _getters = new Dictionary<string, Func<double>>();
         private Dictionary<string, Action<double>> _setters = new Dictionary<string, Action<double>>();
         private Dictionary<string, object> _boundObjects = new Dictionary<string, object>();
-        
+
         // Event callbacks
         public Action OnStart;
         public Action OnUpdate;
@@ -72,13 +72,13 @@ namespace EngineCore.Scripting
             {
                 _script = new ManagedScript();
                 _script.Parse(source);
-                
+
                 // Register all functions
                 foreach (var kvp in _functions)
                 {
                     _script.RegisterNative(kvp.Key, args => kvp.Value(args));
                 }
-                
+
                 return true;
             }
             catch (Exception ex)
@@ -101,7 +101,6 @@ namespace EngineCore.Scripting
             }
             return Load(System.IO.File.ReadAllText(path));
         }
-
         /// <summary>
         /// Register a native function callable from scripts
         /// </summary>
@@ -116,7 +115,8 @@ namespace EngineCore.Scripting
         /// </summary>
         public void RegisterAction(string name, Action action)
         {
-            RegisterFunction(name, _ => { action(); return 0; });
+            ScriptFunction wrapper = _ => { action(); return 0; };
+            RegisterFunction(name, wrapper);
         }
 
         /// <summary>
@@ -124,27 +124,31 @@ namespace EngineCore.Scripting
         /// </summary>
         public void RegisterFunction(string name, Func<double> func)
         {
-            RegisterFunction(name, _ => func());
+            ScriptFunction wrapper = _ => func();
+            RegisterFunction(name, wrapper);
         }
 
         public void RegisterFunction(string name, Func<double, double> func)
         {
-            RegisterFunction(name, args => func(args.Length > 0 ? args[0] : 0));
+            ScriptFunction wrapper = args => func(args.Length > 0 ? args[0] : 0);
+            RegisterFunction(name, wrapper);
         }
 
         public void RegisterFunction(string name, Func<double, double, double> func)
         {
-            RegisterFunction(name, args => func(
+            ScriptFunction wrapper = args => func(
                 args.Length > 0 ? args[0] : 0,
-                args.Length > 1 ? args[1] : 0));
+                args.Length > 1 ? args[1] : 0);
+            RegisterFunction(name, wrapper);
         }
 
         public void RegisterFunction(string name, Func<double, double, double, double> func)
         {
-            RegisterFunction(name, args => func(
+            ScriptFunction wrapper = args => func(
                 args.Length > 0 ? args[0] : 0,
                 args.Length > 1 ? args[1] : 0,
-                args.Length > 2 ? args[2] : 0));
+                args.Length > 2 ? args[2] : 0);
+            RegisterFunction(name, wrapper);
         }
 
         /// <summary>
@@ -173,7 +177,7 @@ namespace EngineCore.Scripting
         public void BindObject(string prefix, object obj)
         {
             if (obj == null) return;
-            
+
             _boundObjects[prefix] = obj;
             var type = obj.GetType();
 
@@ -183,10 +187,10 @@ namespace EngineCore.Scripting
                 var attr = method.GetCustomAttribute<ScriptCallableAttribute>();
                 if (attr != null)
                 {
-                    string name = string.IsNullOrEmpty(prefix) 
+                    string name = string.IsNullOrEmpty(prefix)
                         ? (attr.Name ?? method.Name)
                         : $"{prefix}_{attr.Name ?? method.Name}";
-                    
+
                     RegisterFunction(name, args => InvokeMethod(obj, method, args));
                 }
             }
@@ -200,7 +204,7 @@ namespace EngineCore.Scripting
                     string name = string.IsNullOrEmpty(prefix)
                         ? (attr.Name ?? field.Name)
                         : $"{prefix}_{attr.Name ?? field.Name}";
-                    
+
                     BindField(name, obj, field, attr.ReadOnly);
                 }
             }
@@ -214,7 +218,7 @@ namespace EngineCore.Scripting
                     string name = string.IsNullOrEmpty(prefix)
                         ? (attr.Name ?? prop.Name)
                         : $"{prefix}_{attr.Name ?? prop.Name}";
-                    
+
                     BindProperty(name, obj, prop, attr.ReadOnly);
                 }
             }
@@ -224,40 +228,40 @@ namespace EngineCore.Scripting
         {
             var parameters = method.GetParameters();
             object[] convertedArgs = new object[parameters.Length];
-            
-            for (int i = 0; i < parameters.Length; i++)
+
+            for (int idx = 0; idx < parameters.Length; idx++)
             {
-                var pType = parameters[i].ParameterType;
-                double argVal = i < args.Length ? args[i] : 0;
-                
-                if (pType == typeof(int)) convertedArgs[i] = (int)argVal;
-                else if (pType == typeof(float)) convertedArgs[i] = (float)argVal;
-                else if (pType == typeof(double)) convertedArgs[i] = argVal;
-                else if (pType == typeof(bool)) convertedArgs[i] = argVal != 0;
-                else convertedArgs[i] = argVal;
+                var pType = parameters[idx].ParameterType;
+                double argVal = idx < args.Length ? args[idx] : 0;
+
+                if (pType == typeof(int)) convertedArgs[idx] = (int)argVal;
+                else if (pType == typeof(float)) convertedArgs[idx] = (float)argVal;
+                else if (pType == typeof(double)) convertedArgs[idx] = argVal;
+                else if (pType == typeof(bool)) convertedArgs[idx] = argVal != 0;
+                else convertedArgs[idx] = argVal;
             }
 
             var result = method.Invoke(obj, convertedArgs);
-            
+
             if (result == null) return 0;
-            if (result is int i) return i;
-            if (result is float f) return f;
-            if (result is double d) return d;
-            if (result is bool b) return b ? 1 : 0;
+            if (result is int intResult) return intResult;
+            if (result is float floatResult) return floatResult;
+            if (result is double doubleResult) return doubleResult;
+            if (result is bool boolResult) return boolResult ? 1 : 0;
             return 0;
         }
 
         private void BindField(string name, object obj, FieldInfo field, bool readOnly)
         {
             var fType = field.FieldType;
-            
+
             _getters[name] = () =>
             {
                 var val = field.GetValue(obj);
-                if (val is int i) return i;
-                if (val is float f) return f;
-                if (val is double d) return d;
-                if (val is bool b) return b ? 1 : 0;
+                if (val is int intVal) return intVal;
+                if (val is float floatVal) return floatVal;
+                if (val is double doubleVal) return doubleVal;
+                if (val is bool boolVal) return boolVal ? 1 : 0;
                 return 0;
             };
 
@@ -276,16 +280,16 @@ namespace EngineCore.Scripting
         private void BindProperty(string name, object obj, PropertyInfo prop, bool readOnly)
         {
             var pType = prop.PropertyType;
-            
+
             if (prop.CanRead)
             {
                 _getters[name] = () =>
                 {
                     var val = prop.GetValue(obj);
-                    if (val is int i) return i;
-                    if (val is float f) return f;
-                    if (val is double d) return d;
-                    if (val is bool b) return b ? 1 : 0;
+                    if (val is int intVal) return intVal;
+                    if (val is float floatVal) return floatVal;
+                    if (val is double doubleVal) return doubleVal;
+                    if (val is bool boolVal) return boolVal ? 1 : 0;
                     return 0;
                 };
             }
@@ -308,7 +312,7 @@ namespace EngineCore.Scripting
         public void PushVariables()
         {
             if (_script == null) return;
-            
+
             foreach (var kvp in _getters)
             {
                 _script.SetFloat(kvp.Key, kvp.Value());
@@ -321,7 +325,7 @@ namespace EngineCore.Scripting
         public void PullVariables()
         {
             if (_script == null) return;
-            
+
             foreach (var kvp in _setters)
             {
                 double val = _script.GetFloat(kvp.Key);
@@ -361,10 +365,10 @@ namespace EngineCore.Scripting
         public void ExecuteUpdate(float deltaTime, float totalTime)
         {
             if (_script == null) return;
-            
+
             _script.SetFloat("delta_time", deltaTime);
             _script.SetFloat("total_time", totalTime);
-            
+
             PushVariables();
             OnUpdate?.Invoke();
             Call("on_update");
@@ -386,7 +390,7 @@ namespace EngineCore.Scripting
         private void RegisterBuiltinFunctions()
         {
             // Logging
-            RegisterFunction("log", args =>
+            RegisterFunction("log", (double[] args) =>
             {
                 string msg = args.Length > 0 ? args[0].ToString() : "";
                 OnLog?.Invoke(msg);
@@ -394,7 +398,7 @@ namespace EngineCore.Scripting
                 return 0;
             });
 
-            RegisterFunction("log_int", args =>
+            RegisterFunction("log_int", (double[] args) =>
             {
                 int val = args.Length > 0 ? (int)args[0] : 0;
                 OnLog?.Invoke(val.ToString());
@@ -402,31 +406,39 @@ namespace EngineCore.Scripting
                 return 0;
             });
 
+            RegisterFunction("print_str", (double[] args) =>
+            {
+                string msg = args.Length > 0 ? args[0].ToString() : "";
+                OnLog?.Invoke(msg);
+                Console.WriteLine($"[Script] {msg}");
+                return 0;
+            });
+
             // Math
-            RegisterFunction("sqrt", args => Math.Sqrt(args[0]));
-            RegisterFunction("abs", args => Math.Abs(args[0]));
-            RegisterFunction("sin", args => Math.Sin(args[0]));
-            RegisterFunction("cos", args => Math.Cos(args[0]));
-            RegisterFunction("tan", args => Math.Tan(args[0]));
-            RegisterFunction("asin", args => Math.Asin(args[0]));
-            RegisterFunction("acos", args => Math.Acos(args[0]));
-            RegisterFunction("atan", args => Math.Atan(args[0]));
-            RegisterFunction("atan2", args => Math.Atan2(args[0], args[1]));
-            RegisterFunction("pow", args => Math.Pow(args[0], args[1]));
-            RegisterFunction("floor", args => Math.Floor(args[0]));
-            RegisterFunction("ceil", args => Math.Ceiling(args[0]));
-            RegisterFunction("round", args => Math.Round(args[0]));
-            RegisterFunction("min", args => Math.Min(args[0], args[1]));
-            RegisterFunction("max", args => Math.Max(args[0], args[1]));
-            RegisterFunction("clamp", args => Math.Max(args[1], Math.Min(args[2], args[0])));
-            RegisterFunction("lerp", args => args[0] + (args[1] - args[0]) * args[2]);
-            RegisterFunction("sign", args => Math.Sign(args[0]));
-            
+            RegisterFunction("sqrt", (double[] args) => Math.Sqrt(args[0]));
+            RegisterFunction("abs", (double[] args) => Math.Abs(args[0]));
+            RegisterFunction("sin", (double[] args) => Math.Sin(args[0]));
+            RegisterFunction("cos", (double[] args) => Math.Cos(args[0]));
+            RegisterFunction("tan", (double[] args) => Math.Tan(args[0]));
+            RegisterFunction("asin", (double[] args) => Math.Asin(args[0]));
+            RegisterFunction("acos", (double[] args) => Math.Acos(args[0]));
+            RegisterFunction("atan", (double[] args) => Math.Atan(args[0]));
+            RegisterFunction("atan2", (double[] args) => Math.Atan2(args[0], args[1]));
+            RegisterFunction("pow", (double[] args) => Math.Pow(args[0], args[1]));
+            RegisterFunction("floor", (double[] args) => Math.Floor(args[0]));
+            RegisterFunction("ceil", (double[] args) => Math.Ceiling(args[0]));
+            RegisterFunction("round", (double[] args) => Math.Round(args[0]));
+            RegisterFunction("min", (double[] args) => Math.Min(args[0], args[1]));
+            RegisterFunction("max", (double[] args) => Math.Max(args[0], args[1]));
+            RegisterFunction("clamp", (double[] args) => Math.Max(args[1], Math.Min(args[2], args[0])));
+            RegisterFunction("lerp", (double[] args) => args[0] + (args[1] - args[0]) * args[2]);
+            RegisterFunction("sign", (double[] args) => Math.Sign(args[0]));
+
             // Random
             var rng = new Random();
-            RegisterFunction("random", _ => rng.NextDouble());
-            RegisterFunction("random_range", args => args[0] + rng.NextDouble() * (args[1] - args[0]));
-            RegisterFunction("random_int", args => rng.Next((int)args[0], (int)args[1]));
+            RegisterFunction("random", (double[] args) => rng.NextDouble());
+            RegisterFunction("random_range", (double[] args) => args[0] + rng.NextDouble() * (args[1] - args[0]));
+            RegisterFunction("random_int", (double[] args) => rng.Next((int)args[0], (int)args[1]));
         }
     }
 
@@ -437,9 +449,10 @@ namespace EngineCore.Scripting
     {
         public string ScriptPath { get; set; }
         public string ScriptSource { get; set; }
-        
+
         private ScriptInterface _interface;
         private bool _initialized;
+        private bool _configured;
 
         public ScriptInterface Interface => _interface;
 
@@ -454,83 +467,123 @@ namespace EngineCore.Scripting
         public void Configure(Action<ScriptInterface> setup)
         {
             setup?.Invoke(_interface);
+            _configured = true;
+
+            // Try to load the script now that we're configured
+            TryLoadScript();
         }
 
         protected override void Awake()
         {
+            // Just bind basic transform stuff in Awake
+            BindTransform();
+
+            // Bind GameObject info
+            _interface.RegisterVariable("active",
+                () => gameObject.activeSelf ? 1 : 0,
+                v => gameObject.activeSelf = v != 0);
+
+            // Try to load if we've already been configured
+            // (in case Awake is called after Configure)
+            if (_configured)
+            {
+                TryLoadScript();
+            }
+        }
+
+        private void TryLoadScript()
+        {
+            if (_initialized) return; // Already loaded
+
             // Load script
             if (!string.IsNullOrEmpty(ScriptPath) && System.IO.File.Exists(ScriptPath))
             {
                 ScriptSource = System.IO.File.ReadAllText(ScriptPath);
+                Console.WriteLine($"[ScriptComponent] Read script from: {ScriptPath}");
             }
 
             if (!string.IsNullOrEmpty(ScriptSource))
             {
-                // Bind transform
-                BindTransform();
-                
-                // Bind GameObject info
-                _interface.RegisterVariable("active", 
-                    () => gameObject.activeSelf ? 1 : 0,
-                    v => gameObject.activeSelf = v != 0);
-                
                 if (_interface.Load(ScriptSource))
                 {
                     _initialized = true;
-                    Console.WriteLine($"Script loaded for {gameObject.name}");
+                    Console.WriteLine($"[ScriptComponent] Script loaded for {gameObject.name}");
                 }
+                else
+                {
+                    Console.WriteLine($"[ScriptComponent] Failed to load script for {gameObject.name}");
+                }
+            }
+            else
+            {
+                Console.WriteLine($"[ScriptComponent] No script source for {gameObject.name}");
             }
         }
 
-        private void BindTransform()
-        {
-            // Position
-            _interface.RegisterVariable("pos_x",
-                () => transform.position.x,
-                v => { var p = transform.position; p.x = (float)v; transform.position = p; });
-            _interface.RegisterVariable("pos_y",
-                () => transform.position.y,
-                v => { var p = transform.position; p.y = (float)v; transform.position = p; });
-            _interface.RegisterVariable("pos_z",
-                () => transform.position.z,
-                v => { var p = transform.position; p.z = (float)v; transform.position = p; });
+     private void BindTransform()
+{
+    // Position - READ ONLY (script can't directly assign)
+    _interface.RegisterVariable("pos_x", () => transform.position.x, null);
+    _interface.RegisterVariable("pos_y", () => transform.position.y, null);
+    _interface.RegisterVariable("pos_z", () => transform.position.z, null);
 
-            // Scale
-            _interface.RegisterVariable("scale_x",
-                () => transform.localScale.x,
-                v => { var s = transform.localScale; s.x = (float)v; transform.localScale = s; });
-            _interface.RegisterVariable("scale_y",
-                () => transform.localScale.y,
-                v => { var s = transform.localScale; s.y = (float)v; transform.localScale = s; });
-            _interface.RegisterVariable("scale_z",
-                () => transform.localScale.z,
-                v => { var s = transform.localScale; s.z = (float)v; transform.localScale = s; });
+    // Add explicit setter functions
+    ScriptFunction setPositionFunc = args =>
+    {
+        var p = transform.position;
+        p.x = (float)args[0];
+        p.y = (float)args[1];
+        p.z = (float)args[2];
+        transform.position = p;
+        // Console.WriteLine($"[SetPosition] ({p.x:F2}, {p.y:F2}, {p.z:F2})");  // COMMENTED OUT
+        return 0;
+    };
+    _interface.RegisterFunction("set_position", setPositionFunc);
 
-            // Rotation helpers
-            _interface.RegisterFunction("rotate", args =>
-            {
-                transform.Rotate((float)args[0], (float)args[1], (float)args[2]);
-                return 0;
-            });
+    // Scale
+    _interface.RegisterVariable("scale_x",
+        () => transform.localScale.x,
+        v => { var s = transform.localScale; s.x = (float)v; transform.localScale = s; });
+    _interface.RegisterVariable("scale_y",
+        () => transform.localScale.y,
+        v => { var s = transform.localScale; s.y = (float)v; transform.localScale = s; });
+    _interface.RegisterVariable("scale_z",
+        () => transform.localScale.z,
+        v => { var s = transform.localScale; s.z = (float)v; transform.localScale = s; });
 
-            _interface.RegisterFunction("look_at", args =>
-            {
-                transform.LookAt(new ECSVector3((float)args[0], (float)args[1], (float)args[2]));
-                return 0;
-            });
+    // Rotation helpers
+    ScriptFunction rotateFunc = args =>
+    {
+        transform.Rotate((float)args[0], (float)args[1], (float)args[2]);
+        return 0;
+    };
+    _interface.RegisterFunction("rotate", rotateFunc);
 
-            _interface.RegisterFunction("translate", args =>
-            {
-                transform.Translate(new ECSVector3((float)args[0], (float)args[1], (float)args[2]), args.Length > 3 && args[3] != 0);
-                return 0;
-            });
-        }
+    ScriptFunction lookAtFunc = args =>
+    {
+        transform.LookAt(new ECSVector3((float)args[0], (float)args[1], (float)args[2]));
+        return 0;
+    };
+    _interface.RegisterFunction("look_at", lookAtFunc);
+
+    ScriptFunction translateFunc = args =>
+    {
+        transform.Translate(new ECSVector3((float)args[0], (float)args[1], (float)args[2]), args.Length > 3 && args[3] != 0);
+        return 0;
+    };
+    _interface.RegisterFunction("translate", translateFunc);
+}
 
         protected override void Start()
         {
             if (_initialized)
             {
+                Console.WriteLine($"[ScriptComponent] Executing Start for {gameObject.name}");
                 _interface.ExecuteStart();
+            }
+            else
+            {
+                Console.WriteLine($"[ScriptComponent] Warning: Start called but script not initialized for {gameObject.name}");
             }
         }
 

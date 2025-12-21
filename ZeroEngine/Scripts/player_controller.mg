@@ -1,51 +1,50 @@
-// player_controller.mg - Example Magolor script for ZeroEngine
+// player_controller.mg - Player movement script
 
-// Called when the script starts
 void fn on_start() {
-    print_str("Player controller initialized!");
+    log("Player script started!");
 }
 
-// Called every frame
 void fn on_update() {
-    // Read engine-provided variables
     let f32 dt = delta_time;
-    let f32 x = pos_x;
-    let f32 y = pos_y;
-    let f32 z = pos_z;
+    let f32 spd = speed;
     
-    // Simple movement logic
-    let f32 speed = 5.0;
+    // Get input (set by engine)
+    let f32 h = input_h;
+    let f32 v = input_v;
     
-    // Move in a circle
-    let f32 time = total_time;
-    pos_x = sin(time) * 3.0;
-    pos_z = cos(time) * 3.0;
+    // Get current position
+    let f32 cur_x = pos_x;
+    let f32 cur_y = pos_y;
+    let f32 cur_z = pos_z;
     
-    // Bounce up and down
-    pos_y = abs(sin(time * 2.0)) * 2.0 + 0.5;
+    // Calculate new position based on input
+    let f32 new_x = cur_x + h * spd * dt;
+    let f32 new_z = cur_z + v * spd * dt;
+    let f32 new_y = cur_y;
+    
+    // Jump
+    if (input_jump > 0.5 && is_grounded > 0.5) {
+        velocity_y = jump_force;
+        is_grounded = 0.0;
+    }
+    
+    // Apply gravity
+    if (is_grounded < 0.5) {
+        velocity_y = velocity_y - 20.0 * dt;
+        new_y = cur_y + velocity_y * dt;
+    }
+    
+    // Ground check
+    if (new_y <= 0.5) {
+        new_y = 0.5;
+        velocity_y = 0.0;
+        is_grounded = 1.0;
+    }
+    
+    // Update position using set_position function
+    set_position(new_x, new_y, new_z);
 }
 
-// Called when destroyed
 void fn on_destroy() {
-    print_str("Player controller destroyed!");
-}
-
-// Custom function for damage calculation
-i32 fn calculate_damage(i32 base_damage, i32 armor) {
-    let i32 reduced = base_damage - armor;
-    if (reduced < 0) {
-        return 0;
-    }
-    return reduced;
-}
-
-// AI decision making
-i32 fn ai_decide(i32 health, i32 distance) {
-    if (health < 20) {
-        return 0; // flee
-    } elif (distance < 5) {
-        return 1; // attack
-    } else {
-        return 2; // patrol
-    }
+    log("Player script destroyed");
 }
