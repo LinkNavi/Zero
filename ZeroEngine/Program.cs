@@ -1,6 +1,4 @@
 ﻿using System;
-using System.Collections;
-using System.IO;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.Common;
@@ -16,88 +14,15 @@ using ECSVector3 = EngineCore.ECS.Vector3;
 
 namespace EngineRuntime
 {
-    // ==================== SCRIPT-DRIVEN PLAYER ====================
-
-    /// <summary>
-    /// Example class that exposes properties to scripts via attributes
-    /// </summary>
-    public class PlayerStats
-    {
-        [ScriptVariable("health")]
-        public float Health = 100f;
-
-        [ScriptVariable("max_health", readOnly: true)]
-        public float MaxHealth = 100f;
-
-        [ScriptVariable("speed")]
-        public float MoveSpeed = 5f;
-
-        [ScriptVariable("jump_force")]
-        public float JumpForce = 8f;
-
-        [ScriptVariable("is_grounded")]
-        public bool IsGrounded = true;
-
-        [ScriptCallable("take_damage")]
-        public float TakeDamage(float amount)
-        {
-            Health = Math.Max(0, Health - amount);
-            Console.WriteLine($"Player took {amount} damage! Health: {Health}");
-            return Health;
-        }
-
-        [ScriptCallable("heal")]
-        public float Heal(float amount)
-        {
-            Health = Math.Min(MaxHealth, Health + amount);
-            return Health;
-        }
-
-        [ScriptCallable("is_alive")]
-        public bool IsAlive() => Health > 0;
-    }
-
-    /// <summary>
-    /// Camera controller with smooth follow (C# implementation)
-    /// </summary>
-    public class CameraController : MonoBehaviour
-    {
-        public Transform target;
-        public ECSVector3 offset = new ECSVector3(0, 5, 10);
-        public float smoothSpeed = 5f;
-
-        protected override void LateUpdate()
-        {
-            if (target == null) return;
-
-            ECSVector3 desiredPosition = new ECSVector3(
-                target.position.x + offset.x,
-                target.position.y + offset.y,
-                target.position.z + offset.z
-            );
-
-            ECSVector3 currentPos = transform.position;
-            transform.position = Vector3Extensions.Lerp(currentPos, desiredPosition, smoothSpeed * Time.DeltaTime);
-            transform.LookAt(target.position);
-        }
-    }
-
-    // ==================== GAME WINDOW ====================
-
-    public class ScriptedGameWindow : GameWindow
+    public class FixedGameWindow : GameWindow
     {
         private Game _game;
-        private Shader _defaultShader;
+        private Shader _shader;
         private Mesh _cubeMesh;
-        private float _playerVelocityY = 0;
-        // Script-related
-        private PlayerStats _playerStats;
-        private ScriptComponent _playerScript;
-        private ScriptComponent _enemyScript;
-        private GameObject _player;
-        private GameObject _enemy;
+        private Mesh _sphereMesh;
+        private Mesh _planeMesh;
 
-        public ScriptedGameWindow(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings)
+        public FixedGameWindow(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings)
             : base(gameWindowSettings, nativeWindowSettings)
         {
         }
@@ -106,384 +31,229 @@ namespace EngineRuntime
         {
             base.OnLoad();
 
-            Console.WriteLine("=== ZeroEngine with Magolor Scripting ===");
+            Console.WriteLine("=== ZeroEngine - Class-Based Scripts ===");
             Console.WriteLine($"OpenGL: {GL.GetString(StringName.Version)}");
-            Console.WriteLine();
 
             // OpenGL setup
             GL.Enable(EnableCap.DepthTest);
             GL.DepthFunc(DepthFunction.Less);
+            GL.Enable(EnableCap.CullFace);
+            GL.CullFace(CullFaceMode.Back);
             GL.Enable(EnableCap.Blend);
             GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
 
             // Initialize systems
             Input.Initialize();
-
-            // Try to initialize audio, but don't crash if it fails
-            try
-            {
-                AudioSystem.Initialize();
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Warning: Audio system could not be initialized: {ex.Message}");
-                Console.WriteLine("Continuing without audio...");
-            }
-
             Debug.Initialize();
 
-            // Create resources
-            GL.ClearColor(0.1f, 0.1f, 0.15f, 1.0f);
-            _defaultShader = new Shader(DefaultShaders.BasicVertexShader, DefaultShaders.BasicFragmentShader);
+            try { AudioSystem.Initialize(); }
+            catch (Exception ex) { Console.WriteLine($"Audio init failed: {ex.Message}"); }
+
+            // Create improved shader
+            _shader = new Shader(ImprovedShaders.VertexShader, ImprovedShaders.FragmentShader);
+            
+            // Create meshes
             _cubeMesh = Mesh.CreateCube();
+            _sphereMesh = Mesh.CreateSphere();
+            _planeMesh = Mesh.CreateQuad();
 
             // Initialize game
             _game = new Game();
             _game.Initialize();
 
-            // Create scripts directory if needed
-            Directory.CreateDirectory("Scripts");
-            CreateExampleScripts();
-
             SetupScene();
 
-            Console.WriteLine("\n=== Initialization Complete ===");
+            Console.WriteLine("\n=== Scene Setup Complete ===");
             Console.WriteLine("Controls:");
-            Console.WriteLine("  WASD - Move (script-controlled)");
+            Console.WriteLine("  WASD - Move player");
             Console.WriteLine("  Space - Jump");
-            Console.WriteLine("  H - Heal player");
-            Console.WriteLine("  K - Damage player");
-            Console.WriteLine("  R - Reload scripts");
             Console.WriteLine("  ESC - Exit");
-            Console.WriteLine();
         }
 
-       private void CreateExampleScripts()
-{
-    // Player controller script - using set_position
-    string playerScript = @"// player_controller.mg - Player movement script
-
-void fn on_start() {
-    log(""Player script started!"");
-}
-
-void fn on_update() {
-    let f32 dt = delta_time;
-    let f32 spd = speed;
-    
-    // Get input (set by engine)
-    let f32 h = input_h;
-    let f32 v = input_v;
-    
-    // Get current position
-    let f32 cur_x = pos_x;
-    let f32 cur_y = pos_y;
-    let f32 cur_z = pos_z;
-    
-    // Calculate new position based on input
-    let f32 new_x = cur_x + h * spd * dt;
-    let f32 new_z = cur_z + v * spd * dt;
-    let f32 new_y = cur_y;
-    
-    // Jump
-    if (input_jump > 0.5 && is_grounded > 0.5) {
-        velocity_y = jump_force;
-        is_grounded = 0.0;
-    }
-    
-    // Apply gravity
-    if (is_grounded < 0.5) {
-        velocity_y = velocity_y - 20.0 * dt;
-        new_y = cur_y + velocity_y * dt;
-    }
-    
-    // Ground check
-    if (new_y <= 0.5) {
-        new_y = 0.5;
-        velocity_y = 0.0;
-        is_grounded = 1.0;
-    }
-    
-    // Update position using set_position function
-    set_position(new_x, new_y, new_z);
-}
-
-void fn on_destroy() {
-    log(""Player script destroyed"");
-}
-";
-
-    // Enemy AI script - using set_position
-    string enemyScript = @"// enemy_ai.mg - Simple enemy AI
-
-let f32 state = 0.0;  // 0=idle, 1=chase, 2=attack
-let f32 timer = 0.0;
-let f32 attack_range = 3.0;
-let f32 detect_range = 8.0;
-let f32 move_speed = 2.5;
-
-void fn on_start() {
-    log(""Enemy AI started!"");
-}
-
-void fn on_update() {
-    let f32 dt = delta_time;
-    timer = timer + dt;
-    
-    // Calculate distance to player
-    let f32 dist = player_distance;
-    
-    // Get current position
-    let f32 my_x = pos_x;
-    let f32 my_y = pos_y;
-    let f32 my_z = pos_z;
-    
-    // State machine
-    if (state < 0.5) {
-        // Idle - bob up and down
-        let f32 new_y = 0.5 + sin(total_time * 2.0) * 0.2;
-        set_position(my_x, new_y, my_z);
-        
-        // Check for player
-        if (dist < detect_range) {
-            state = 1.0;
-            log(""Enemy detected player!"");
-        }
-    } elif (state < 1.5) {
-        // Chase
-        let f32 dx = player_x - my_x;
-        let f32 dz = player_z - my_z;
-        
-        if (dist > 0.1) {
-            let f32 nx = dx / dist;
-            let f32 nz = dz / dist;
-            let f32 new_x = my_x + nx * move_speed * dt;
-            let f32 new_z = my_z + nz * move_speed * dt;
-            set_position(new_x, my_y, new_z);
-        }
-        
-        // Attack if close
-        if (dist < attack_range) {
-            state = 2.0;
-            timer = 0.0;
-        }
-        
-        // Lose interest if too far
-        if (dist > detect_range * 1.5) {
-            state = 0.0;
-            log(""Enemy lost player"");
-        }
-    } else {
-        // Attack
-        if (timer > 1.0) {
-            log(""Enemy attacks!"");
-            timer = 0.0;
-        }
-        
-        // Chase if player moved away
-        if (dist > attack_range * 1.2) {
-            state = 1.0;
-        }
-    }
-    
-    // Visual feedback - change color based on state (via scale hack)
-    scale_y = 1.0 + state * 0.2;
-}
-
-void fn on_destroy() {
-    log(""Enemy destroyed"");
-}
-";
-
-    File.WriteAllText("Scripts/player_controller.mg", playerScript);
-    File.WriteAllText("Scripts/enemy_ai.mg", enemyScript);
-    Console.WriteLine("Created example scripts in Scripts/");
-}
         private void SetupScene()
         {
             var scene = _game.Scene;
-            Debug.Log("Creating scene...");
 
-            // Camera (needed to see anything)
+            // ==================== CAMERA ====================
             var cameraGO = scene.CreateGameObject("Main Camera");
             cameraGO.tag = "MainCamera";
+            cameraGO.transform.position = new ECSVector3(0, 8, 12);
+            cameraGO.transform.LookAt(new ECSVector3(0, 0, 0)); // FIXED: Proper look-at
+            
             var camera = cameraGO.AddComponent<CameraComponent>();
             camera.fieldOfView = 60f;
-            camera.backgroundColor = new Color4(0.2f, 0.3f, 0.4f, 1.0f);
-            cameraGO.transform.position = new ECSVector3(0, 8, 12);
+            camera.backgroundColor = new Color4(0.2f, 0.3f, 0.5f, 1.0f);
 
-            var camController = cameraGO.AddComponent<CameraController>();
-            camController.offset = new ECSVector3(0, 8, 12);
-            Debug.Log("Camera created");
+            // Add follow script to camera
+            var camScript = cameraGO.AddComponent<ScriptComponent>();
+            camScript.SetScriptType<FollowCamera>();
+            // We'll set the target after creating the player
 
-            // Ground (needed for reference, but no script)
+            Console.WriteLine("✓ Camera created");
+
+            // ==================== GROUND ====================
             var ground = scene.CreateGameObject("Ground");
             ground.transform.position = new ECSVector3(0, -0.5f, 0);
-            ground.transform.localScale = new ECSVector3(30, 1, 30);
+            ground.transform.localScale = new ECSVector3(50, 1, 50);
+            
             var groundRenderer = ground.AddComponent<MeshRenderer>();
             groundRenderer.mesh = _cubeMesh;
-            groundRenderer.material = new Material(_defaultShader) { Color = new Vector4(0.3f, 0.5f, 0.3f, 1.0f) };
-            Debug.Log("Ground created");
+            groundRenderer.material = new Material(_shader)
+            {
+                Color = new Vector4(0.3f, 0.6f, 0.3f, 1.0f),
+                Shininess = 16f,
+                Roughness = 0.8f
+            };
 
-            // Player with script (ONLY OBJECT WITH SCRIPT #1)
-            _player = scene.CreateGameObject("Player");
-            _player.transform.position = new ECSVector3(0, 0.5f, 0);
+            Console.WriteLine("✓ Ground created");
 
-            var playerRenderer = _player.AddComponent<MeshRenderer>();
+            // ==================== DIRECTIONAL LIGHT ====================
+            var lightGO = scene.CreateGameObject("Sun");
+            lightGO.transform.SetEulerAngles(-45, 45, 0);
+            
+            var light = lightGO.AddComponent<Light>();
+            light.type = Light.LightType.Directional;
+            light.color = new Color4(1f, 0.95f, 0.8f, 1f);
+            light.intensity = 1.2f;
+
+            Console.WriteLine("✓ Light created");
+
+            // ==================== PLAYER (with script) ====================
+            var player = scene.CreateGameObject("Player");
+            player.transform.position = new ECSVector3(0, 0.5f, 0);
+            
+            var playerRenderer = player.AddComponent<MeshRenderer>();
             playerRenderer.mesh = _cubeMesh;
-            playerRenderer.material = new Material(_defaultShader) { Color = new Vector4(0.2f, 0.6f, 1.0f, 1.0f) };
-            Debug.Log("Player GameObject created");
-
-            // Setup player script with custom bindings
-            _playerStats = new PlayerStats();
-            _playerScript = _player.AddComponent<ScriptComponent>();
-            _playerScript.ScriptPath = "Scripts/player_controller.mg";
-            Debug.Log("Player script component added");
-
-            _playerScript.Configure(iface =>
+            playerRenderer.material = new Material(_shader)
             {
-                Debug.Log("Configuring player script...");
+                Color = new Vector4(0.2f, 0.6f, 1.0f, 1.0f),
+                Shininess = 32f,
+                Roughness = 0.3f
+            };
 
-                // Bind PlayerStats object (auto-binds all [ScriptVariable] and [ScriptCallable])
-                iface.BindObject("", _playerStats);
+            // Add PlayerController script
+            var playerScript = player.AddComponent<ScriptComponent>();
+            playerScript.SetScriptType<PlayerController>();
+            var controller = playerScript.GetScript<PlayerController>();
+            controller.moveSpeed = 5f;
+            controller.jumpForce = 8f;
 
-                // Custom velocity variable that persists
-                iface.RegisterVariable("velocity_y",
-                    () => _playerVelocityY,
-                    v => _playerVelocityY = (float)v);
+            Console.WriteLine("✓ Player created with PlayerController script");
 
-                // Input variables
-                iface.RegisterVariable("input_h", () => Input.GetAxisHorizontal());
-                iface.RegisterVariable("input_v", () => Input.GetAxisVertical());
-                iface.RegisterVariable("input_jump", () => Input.GetKeyDown(KeyCode.Space) ? 1.0 : 0.0);
+            // Set camera to follow player
+            var followCam = camScript.GetScript<FollowCamera>();
+            followCam.target = player.transform;
+            followCam.offset = new ECSVector3(0, 8, 12);
+            followCam.smoothSpeed = 5f;
 
-                // Log callback
-                iface.OnLog = msg => Debug.Log($"[Player] {msg}");
-
-                Debug.Log("Player script configured");
-            });
-
-            camController.target = _player.transform;
-            Debug.Log("Player setup complete");
-
-            // Enemy with script (ONLY OBJECT WITH SCRIPT #2)
-            _enemy = scene.CreateGameObject("Enemy");
-            _enemy.transform.position = new ECSVector3(5, 1, 5);
-
-            var enemyRenderer = _enemy.AddComponent<MeshRenderer>();
+            // ==================== ENEMY (with AI script) ====================
+            var enemy = scene.CreateGameObject("Enemy");
+            enemy.transform.position = new ECSVector3(8, 1f, 5);
+            
+            var enemyRenderer = enemy.AddComponent<MeshRenderer>();
             enemyRenderer.mesh = _cubeMesh;
-            enemyRenderer.material = new Material(_defaultShader) { Color = new Vector4(1.0f, 0.3f, 0.3f, 1.0f) };
-            Debug.Log("Enemy GameObject created");
-
-            _enemyScript = _enemy.AddComponent<ScriptComponent>();
-            _enemyScript.ScriptPath = "Scripts/enemy_ai.mg";
-
-            _enemyScript.Configure(iface =>
+            enemyRenderer.material = new Material(_shader)
             {
-                Debug.Log("Configuring enemy script...");
+                Color = new Vector4(1.0f, 0.3f, 0.3f, 1.0f),
+                Shininess = 32f,
+                Roughness = 0.4f
+            };
 
-                // Give enemy access to player position
-                iface.RegisterVariable("player_x", () => _player.transform.position.x);
-                iface.RegisterVariable("player_y", () => _player.transform.position.y);
-                iface.RegisterVariable("player_z", () => _player.transform.position.z);
+            // Add EnemyAI script
+            var enemyScript = enemy.AddComponent<ScriptComponent>();
+            enemyScript.SetScriptType<EnemyAI>();
+            var ai = enemyScript.GetScript<EnemyAI>();
+            ai.target = player.transform;
+            ai.detectRange = 10f;
+            ai.attackRange = 3f;
+            ai.moveSpeed = 3f;
 
-                // Calculate distance to player
-                iface.RegisterVariable("player_distance", () =>
+            Console.WriteLine("✓ Enemy created with EnemyAI script");
+
+            // ==================== COLLECTIBLES ====================
+            for (int i = 0; i < 5; i++)
+            {
+                float angle = (i / 5f) * MathF.PI * 2f;
+                float radius = 8f;
+                
+                var collectible = scene.CreateGameObject($"Collectible_{i}");
+                collectible.transform.position = new ECSVector3(
+                    MathF.Cos(angle) * radius,
+                    1f,
+                    MathF.Sin(angle) * radius
+                );
+                collectible.transform.localScale = new ECSVector3(0.5f, 0.5f, 0.5f);
+                
+                var colRenderer = collectible.AddComponent<MeshRenderer>();
+                colRenderer.mesh = _sphereMesh;
+                colRenderer.material = new Material(_shader)
                 {
-                    var dx = _player.transform.position.x - _enemy.transform.position.x;
-                    var dz = _player.transform.position.z - _enemy.transform.position.z;
-                    return Math.Sqrt(dx * dx + dz * dz);
-                });
-
-                // Enemy can damage player
-                ScriptFunction damageFunc = args =>
-                {
-                    _playerStats.TakeDamage((float)args[0]);
-                    return _playerStats.Health;
+                    Color = new Vector4(1f, 0.8f, 0.2f, 1f),
+                    Emission = new OpenTK.Mathematics.Vector3(0.2f, 0.15f, 0.05f),
+                    Shininess = 64f,
+                    Roughness = 0.2f
                 };
-                iface.RegisterFunction("damage_player", damageFunc);
 
+                // Add Collectible script
+                var colScript = collectible.AddComponent<ScriptComponent>();
+                colScript.SetScriptType<Collectible>();
+            }
 
+            Console.WriteLine("✓ Collectibles created");
 
-                Debug.Log("Enemy script configured");
-            });
+            // ==================== ROTATING CUBES ====================
+            for (int i = 0; i < 3; i++)
+            {
+                var cube = scene.CreateGameObject($"RotatingCube_{i}");
+                cube.transform.position = new ECSVector3(-5 + i * 5, 2f, -5);
+                
+                var cubeRenderer = cube.AddComponent<MeshRenderer>();
+                cubeRenderer.mesh = _cubeMesh;
+                cubeRenderer.material = new Material(_shader)
+                {
+                    Color = new Vector4(
+                        0.5f + i * 0.2f,
+                        0.3f,
+                        1f - i * 0.2f,
+                        1f
+                    ),
+                    Shininess = 32f
+                };
 
-            // Light (needed for visibility)
-            var light = scene.CreateGameObject("Light");
-            var lightComp = light.AddComponent<Light>();
-            lightComp.type = Light.LightType.Directional;
-            lightComp.intensity = 1.0f;
-            light.transform.SetEulerAngles(-45, 45, 0);
-            Debug.Log("Light created");
+                // Add Rotator script
+                var rotScript = cube.AddComponent<ScriptComponent>();
+                rotScript.SetScriptType<Rotator>();
+                var rotator = rotScript.GetScript<Rotator>();
+                rotator.rotationSpeed = 45f + i * 30f;
+                rotator.axis = new ECSVector3(0, 1, i * 0.3f);
+            }
 
-            Debug.Log($"Scene created with 2 scripted objects (Player + Enemy)");
+            Console.WriteLine("✓ Rotating cubes created");
         }
 
-       protected override void OnUpdateFrame(FrameEventArgs args)
-{
-    base.OnUpdateFrame(args);
-
-    Input.Update(KeyboardState, MouseState);
-    Time.Update((float)args.Time);
-    Debug.Update(Time.DeltaTime);
-
-    // Temporary debug - remove after testing
-    float h = Input.GetAxisHorizontal();
-    float v = Input.GetAxisVertical();
-    if (h != 0 || v != 0)
-    {
-        Console.WriteLine($"Input - H: {h:F2}, V: {v:F2} | Player pos: ({_player.transform.position.x:F2}, {_player.transform.position.y:F2}, {_player.transform.position.z:F2})");
-    }
-
-    // Exit
-    if (Input.GetKeyDown(KeyCode.Escape))
-        Close();
-
-    // Debug keys
-    if (Input.GetKeyDown(KeyCode.H))
-    {
-        _playerStats.Heal(20);
-        Debug.Log($"Healed! Health: {_playerStats.Health}");
-    }
-    
-    if (Input.GetKeyDown(KeyCode.K))
-    {
-        _playerStats.TakeDamage(10);
-    }
-    
-    if (Input.GetKeyDown(KeyCode.R))
-    {
-        ReloadScripts();
-    }
-
-    // Update game
-    _game.Update(args.Time);
-    _game.LateUpdate();
-
-    // Update audio listener (only if audio is initialized)
-    if (AudioSystem.IsInitialized)
-    {
-        var mainCam = CameraComponent.Main;
-        if (mainCam != null)
+        protected override void OnUpdateFrame(FrameEventArgs args)
         {
-            AudioSystem.SetListenerPosition(mainCam.transform.position);
-            AudioSystem.SetListenerOrientation(mainCam.transform.forward, mainCam.transform.up);
-        }
-    }
-    
-    // Debug visualization
-    //Debug.DrawWireBox(_player.transform.position, new ECSVector3(1, 1, 1), Color4.Cyan);
-    //Debug.DrawWireBox(_enemy.transform.position, new ECSVector3(1, 1, 1), Color4.Red);
-    //Debug.DrawLine(_enemy.transform.position, _player.transform.position, Color4.Yellow);
-}
+            base.OnUpdateFrame(args);
 
-        private void ReloadScripts()
-        {
-            Debug.Log("Reloading scripts...");
+            Input.Update(KeyboardState, MouseState);
+            Time.Update((float)args.Time);
+            Debug.Update(Time.DeltaTime);
 
-            // In a full implementation, you'd reload the ScriptComponent
-            // For now just log
-            Debug.Log("Scripts reloaded (hot-reload not fully implemented)");
+            if (Input.GetKeyDown(KeyCode.Escape))
+                Close();
+
+            _game.Update(args.Time);
+            _game.LateUpdate();
+
+            if (AudioSystem.IsInitialized)
+            {
+                var mainCam = CameraComponent.Main;
+                if (mainCam != null)
+                {
+                    AudioSystem.SetListenerPosition(mainCam.transform.position);
+                    AudioSystem.SetListenerOrientation(mainCam.transform.forward, mainCam.transform.up);
+                }
+            }
         }
 
         protected override void OnRenderFrame(FrameEventArgs args)
@@ -498,15 +268,13 @@ void fn on_destroy() {
                 if (mainCam != null)
                     Debug.Render(mainCam.GetCamera());
 
-                // Simple UI overlay
-                Title = $"ZeroEngine | FPS: {1.0 / args.Time:F0} | Health: {_playerStats.Health:F0}";
+                Title = $"ZeroEngine | FPS: {1.0 / args.Time:F0}";
 
                 SwapBuffers();
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Render error: {ex.Message}");
-                Debug.LogError($"Stack trace: {ex.StackTrace}");
+                Console.WriteLine($"Render error: {ex.Message}");
             }
         }
 
@@ -520,39 +288,35 @@ void fn on_destroy() {
         protected override void OnUnload()
         {
             base.OnUnload();
-            Debug.Log("Shutting down...");
-            _defaultShader?.Dispose();
+            _shader?.Dispose();
             _cubeMesh?.Dispose();
+            _sphereMesh?.Dispose();
+            _planeMesh?.Dispose();
             AudioSystem.Shutdown();
         }
     }
-
-    // ==================== ENTRY POINT ====================
 
     class Program
     {
         static void Main(string[] args)
         {
             Console.WriteLine("╔══════════════════════════════════════════════╗");
-            Console.WriteLine("║  ZeroEngine with Magolor Scripting Support   ║");
+            Console.WriteLine("║       ZeroEngine - Class-Based Scripts       ║");
             Console.WriteLine("╠══════════════════════════════════════════════╣");
             Console.WriteLine("║  Features:                                   ║");
-            Console.WriteLine("║  ✓ Magolor Scripting Language                ║");
-            Console.WriteLine("║  ✓ Script-to-C# Variable Binding             ║");
-            Console.WriteLine("║  ✓ Attribute-based Function Export           ║");
-            Console.WriteLine("║  ✓ Hot Variables (delta_time, pos_x, etc)    ║");
-            Console.WriteLine("║  ✓ Custom Native Functions                   ║");
+            Console.WriteLine("║  ✓ Unity/PlayCanvas Style Scripts            ║");
+            Console.WriteLine("║  ✓ Inherit from ScriptBase                   ║");
+            Console.WriteLine("║  ✓ OnStart/OnUpdate/OnDestroy                ║");
+            Console.WriteLine("║  ✓ Fixed Camera System                       ║");
+            Console.WriteLine("║  ✓ Improved Lighting                         ║");
             Console.WriteLine("╚══════════════════════════════════════════════╝");
-            Console.WriteLine();
 
             var gameSettings = GameWindowSettings.Default;
             var nativeSettings = new NativeWindowSettings()
             {
-                Title = "ZeroEngine - Scripted",
+                Title = "ZeroEngine - Fixed",
                 ClientSize = new Vector2i(1280, 720),
                 WindowBorder = WindowBorder.Fixed,
-                StartVisible = true,
-                StartFocused = true,
                 API = ContextAPI.OpenGL,
                 Profile = ContextProfile.Core,
                 APIVersion = new Version(3, 3)
@@ -560,15 +324,13 @@ void fn on_destroy() {
 
             try
             {
-                using var game = new ScriptedGameWindow(gameSettings, nativeSettings);
+                using var game = new FixedGameWindow(gameSettings, nativeSettings);
                 game.Run();
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Fatal error: {ex}");
             }
-
-            Console.WriteLine("\nEngine shut down.");
         }
     }
 }

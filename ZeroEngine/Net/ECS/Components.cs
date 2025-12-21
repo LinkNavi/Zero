@@ -10,9 +10,9 @@ namespace EngineCore.Components
 {
     // ==================== CAMERA COMPONENT ====================
 
-    /// <summary>
+   /// <summary>
     /// Camera component - Unity style
-    /// Attach this to a GameObject to make it a camera
+    /// FIXED: Proper camera orientation
     /// </summary>
     public class CameraComponent : Component
     {
@@ -49,31 +49,35 @@ namespace EngineCore.Components
         }
 
         /// <summary>
-        /// Sync the camera with the GameObject's transform
+        /// FIXED: Properly sync camera with GameObject's transform
         /// </summary>
-
         private void UpdateCameraFromTransform()
         {
-            // Use the GameObject's transform position
+            // Camera position from transform
             _camera.Position = new OpenTK.Mathematics.Vector3(
                 transform.position.x,
                 transform.position.y,
                 transform.position.z
             );
 
-            // FIX: Make camera look toward negative Z (standard OpenGL convention)
-            // When camera is at (0, 2, 5), it should look at (0, 2, 0) or lower Z values
-            _camera.Target = _camera.Position + new OpenTK.Mathematics.Vector3(0, 0, -1);
+            // FIXED: Calculate target based on forward direction
+            // Camera looks toward negative Z by default in OpenGL
+            var forward = transform.forward;
+            _camera.Target = _camera.Position + new OpenTK.Mathematics.Vector3(
+                forward.x,
+                forward.y,
+                forward.z
+            );
 
-            // Standard up vector
-            _camera.Up = new OpenTK.Mathematics.Vector3(0, 1, 0);
+            // Up vector from transform
+            var up = transform.up;
+            _camera.Up = new OpenTK.Mathematics.Vector3(up.x, up.y, up.z);
 
             // Update camera settings
             _camera.FieldOfView = MathHelper.DegreesToRadians(fieldOfView);
             _camera.NearClip = nearClipPlane;
             _camera.FarClip = farClipPlane;
         }
-
 
         /// <summary>
         /// Find the main camera in the scene (tagged "MainCamera")
@@ -87,7 +91,6 @@ namespace EngineCore.Components
             }
         }
     }
-
     // ==================== MESH RENDERER COMPONENT ====================
 
     /// <summary>
