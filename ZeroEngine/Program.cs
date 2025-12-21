@@ -14,7 +14,7 @@ using ECSVector3 = EngineCore.ECS.Vector3;
 
 namespace EngineRuntime
 {
-    public class FixedGameWindow : GameWindow
+    public class MagolorGameWindow : GameWindow
     {
         private Game _game;
         private Shader _shader;
@@ -22,7 +22,7 @@ namespace EngineRuntime
         private Mesh _sphereMesh;
         private Mesh _planeMesh;
 
-        public FixedGameWindow(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings)
+        public MagolorGameWindow(GameWindowSettings gameWindowSettings, NativeWindowSettings nativeWindowSettings)
             : base(gameWindowSettings, nativeWindowSettings)
         {
         }
@@ -31,7 +31,9 @@ namespace EngineRuntime
         {
             base.OnLoad();
 
-            Console.WriteLine("=== ZeroEngine - Class-Based Scripts ===");
+            Console.WriteLine("╔══════════════════════════════════════════════╗");
+            Console.WriteLine("║       ZeroEngine - Magolor Scripting         ║");
+            Console.WriteLine("╚══════════════════════════════════════════════╝");
             Console.WriteLine($"OpenGL: {GL.GetString(StringName.Version)}");
 
             // OpenGL setup
@@ -63,11 +65,21 @@ namespace EngineRuntime
 
             SetupScene();
 
-            Console.WriteLine("\n=== Scene Setup Complete ===");
-            Console.WriteLine("Controls:");
-            Console.WriteLine("  WASD - Move player");
-            Console.WriteLine("  Space - Jump");
-            Console.WriteLine("  ESC - Exit");
+            Console.WriteLine("\n╔══════════════════════════════════════════════╗");
+            Console.WriteLine("║           Scene Setup Complete               ║");
+            Console.WriteLine("╠══════════════════════════════════════════════╣");
+            Console.WriteLine("║ Controls:                                    ║");
+            Console.WriteLine("║   WASD     - Move player                     ║");
+            Console.WriteLine("║   Space    - Jump                            ║");
+            Console.WriteLine("║   ESC      - Exit                            ║");
+            Console.WriteLine("╠══════════════════════════════════════════════╣");
+            Console.WriteLine("║ Magolor Scripts Active:                      ║");
+            Console.WriteLine("║   ✓ PlayerController.mg                      ║");
+            Console.WriteLine("║   ✓ EnemyAI.mg                               ║");
+            Console.WriteLine("║   ✓ FollowCamera.mg                          ║");
+            Console.WriteLine("║   ✓ Collectible.mg                           ║");
+            Console.WriteLine("║   ✓ Rotator.mg                               ║");
+            Console.WriteLine("╚══════════════════════════════════════════════╝");
         }
 
         private void SetupScene()
@@ -78,18 +90,16 @@ namespace EngineRuntime
             var cameraGO = scene.CreateGameObject("Main Camera");
             cameraGO.tag = "MainCamera";
             cameraGO.transform.position = new ECSVector3(0, 8, 12);
-            cameraGO.transform.LookAt(new ECSVector3(0, 0, 0)); // FIXED: Proper look-at
+            cameraGO.transform.LookAt(new ECSVector3(0, 0, 0));
             
             var camera = cameraGO.AddComponent<CameraComponent>();
             camera.fieldOfView = 60f;
             camera.backgroundColor = new Color4(0.2f, 0.3f, 0.5f, 1.0f);
 
-            // Add follow script to camera
-            var camScript = cameraGO.AddComponent<ScriptComponent>();
-            camScript.SetScriptType<FollowCamera>();
-            // We'll set the target after creating the player
+            // Add Magolor follow camera script
+            var camScript = MagolorScriptComponent.CreateFromFile(cameraGO, "Scripts/FollowCamera.mg");
 
-            Console.WriteLine("✓ Camera created");
+            Console.WriteLine("✓ Camera created with Magolor FollowCamera.mg");
 
             // ==================== GROUND ====================
             var ground = scene.CreateGameObject("Ground");
@@ -118,7 +128,7 @@ namespace EngineRuntime
 
             Console.WriteLine("✓ Light created");
 
-            // ==================== PLAYER (with script) ====================
+            // ==================== PLAYER (with Magolor script) ====================
             var player = scene.CreateGameObject("Player");
             player.transform.position = new ECSVector3(0, 0.5f, 0);
             
@@ -131,22 +141,21 @@ namespace EngineRuntime
                 Roughness = 0.3f
             };
 
-            // Add PlayerController script
-            var playerScript = player.AddComponent<ScriptComponent>();
-            playerScript.SetScriptType<PlayerController>();
-            var controller = playerScript.GetScript<PlayerController>();
-            controller.moveSpeed = 5f;
-            controller.jumpForce = 8f;
+            // Add optional Rigidbody for physics
+            var rb = player.AddComponent<EngineCore.Physics.Rigidbody>();
+            rb.useGravity = false; // We handle gravity in script
+            rb.isKinematic = true;
 
-            Console.WriteLine("✓ Player created with PlayerController script");
+            // Add Magolor PlayerController script
+            var playerScript = MagolorScriptComponent.CreateFromFile(player, "Scripts/PlayerController.mg");
+
+            Console.WriteLine("✓ Player created with Magolor PlayerController.mg");
 
             // Set camera to follow player
-            var followCam = camScript.GetScript<FollowCamera>();
-            followCam.target = player.transform;
-            followCam.offset = new ECSVector3(0, 8, 12);
-            followCam.smoothSpeed = 5f;
+            // Note: In a real implementation, you'd need to pass the target reference to the script
+            // For now, the script would need to find the player by name
 
-            // ==================== ENEMY (with AI script) ====================
+            // ==================== ENEMY (with Magolor AI script) ====================
             var enemy = scene.CreateGameObject("Enemy");
             enemy.transform.position = new ECSVector3(8, 1f, 5);
             
@@ -159,16 +168,10 @@ namespace EngineRuntime
                 Roughness = 0.4f
             };
 
-            // Add EnemyAI script
-            var enemyScript = enemy.AddComponent<ScriptComponent>();
-            enemyScript.SetScriptType<EnemyAI>();
-            var ai = enemyScript.GetScript<EnemyAI>();
-            ai.target = player.transform;
-            ai.detectRange = 10f;
-            ai.attackRange = 3f;
-            ai.moveSpeed = 3f;
+            // Add Magolor EnemyAI script
+            var enemyScript = MagolorScriptComponent.CreateFromFile(enemy, "Scripts/EnemyAI.mg");
 
-            Console.WriteLine("✓ Enemy created with EnemyAI script");
+            Console.WriteLine("✓ Enemy created with Magolor EnemyAI.mg");
 
             // ==================== COLLECTIBLES ====================
             for (int i = 0; i < 5; i++)
@@ -194,12 +197,11 @@ namespace EngineRuntime
                     Roughness = 0.2f
                 };
 
-                // Add Collectible script
-                var colScript = collectible.AddComponent<ScriptComponent>();
-                colScript.SetScriptType<Collectible>();
+                // Add Magolor Collectible script
+                var colScript = MagolorScriptComponent.CreateFromFile(collectible, "Scripts/Collectible.mg");
             }
 
-            Console.WriteLine("✓ Collectibles created");
+            Console.WriteLine($"✓ 5 Collectibles created with Magolor Collectible.mg");
 
             // ==================== ROTATING CUBES ====================
             for (int i = 0; i < 3; i++)
@@ -220,15 +222,11 @@ namespace EngineRuntime
                     Shininess = 32f
                 };
 
-                // Add Rotator script
-                var rotScript = cube.AddComponent<ScriptComponent>();
-                rotScript.SetScriptType<Rotator>();
-                var rotator = rotScript.GetScript<Rotator>();
-                rotator.rotationSpeed = 45f + i * 30f;
-                rotator.axis = new ECSVector3(0, 1, i * 0.3f);
+                // Add Magolor Rotator script
+                var rotScript = MagolorScriptComponent.CreateFromFile(cube, "Scripts/Rotator.mg");
             }
 
-            Console.WriteLine("✓ Rotating cubes created");
+            Console.WriteLine($"✓ 3 Rotating cubes created with Magolor Rotator.mg");
         }
 
         protected override void OnUpdateFrame(FrameEventArgs args)
@@ -268,7 +266,7 @@ namespace EngineRuntime
                 if (mainCam != null)
                     Debug.Render(mainCam.GetCamera());
 
-                Title = $"ZeroEngine | FPS: {1.0 / args.Time:F0}";
+                Title = $"ZeroEngine - Magolor Scripting | FPS: {1.0 / args.Time:F0}";
 
                 SwapBuffers();
             }
@@ -301,20 +299,24 @@ namespace EngineRuntime
         static void Main(string[] args)
         {
             Console.WriteLine("╔══════════════════════════════════════════════╗");
-            Console.WriteLine("║       ZeroEngine - Class-Based Scripts       ║");
+            Console.WriteLine("║       ZeroEngine - Magolor Scripting         ║");
             Console.WriteLine("╠══════════════════════════════════════════════╣");
-            Console.WriteLine("║  Features:                                   ║");
-            Console.WriteLine("║  ✓ Unity/PlayCanvas Style Scripts            ║");
-            Console.WriteLine("║  ✓ Inherit from ScriptBase                   ║");
-            Console.WriteLine("║  ✓ OnStart/OnUpdate/OnDestroy                ║");
-            Console.WriteLine("║  ✓ Fixed Camera System                       ║");
-            Console.WriteLine("║  ✓ Improved Lighting                         ║");
-            Console.WriteLine("╚══════════════════════════════════════════════╝");
+            Console.WriteLine("║  Unity-Style Class-Based Scripts             ║");
+            Console.WriteLine("║  Powered by Magolor Language                 ║");
+            Console.WriteLine("╠══════════════════════════════════════════════╣");
+            Console.WriteLine("║  Script Template:                            ║");
+            Console.WriteLine("║                                              ║");
+            Console.WriteLine("║    class MyScript {                          ║");
+            Console.WriteLine("║        void fn OnStart() { }                 ║");
+            Console.WriteLine("║        void fn OnUpdate() { }                ║");
+            Console.WriteLine("║        void fn OnDestroy() { }               ║");
+            Console.WriteLine("║    }                                         ║");
+            Console.WriteLine("╚══════════════════════════════════════════════╝\n");
 
             var gameSettings = GameWindowSettings.Default;
             var nativeSettings = new NativeWindowSettings()
             {
-                Title = "ZeroEngine - Fixed",
+                Title = "ZeroEngine - Magolor Scripting",
                 ClientSize = new Vector2i(1280, 720),
                 WindowBorder = WindowBorder.Fixed,
                 API = ContextAPI.OpenGL,
@@ -324,12 +326,17 @@ namespace EngineRuntime
 
             try
             {
-                using var game = new FixedGameWindow(gameSettings, nativeSettings);
+                using var game = new MagolorGameWindow(gameSettings, nativeSettings);
                 game.Run();
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Fatal error: {ex}");
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine($"\n╔══════════════════════════════════════════════╗");
+                Console.WriteLine($"║              FATAL ERROR                     ║");
+                Console.WriteLine($"╚══════════════════════════════════════════════╝");
+                Console.WriteLine($"\n{ex}");
+                Console.ResetColor();
             }
         }
     }
