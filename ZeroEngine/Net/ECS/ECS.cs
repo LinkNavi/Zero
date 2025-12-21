@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -171,29 +172,30 @@ namespace EngineCore.ECS
                 rotation = worldRot;
             }
         }
+
         /// <summary>
         /// Rotate the transform around a point by eulerAngles degrees
         /// </summary>
-        public static void Rotate(this Transform transform, float xAngle, float yAngle, float zAngle)
+        public void Rotate(float xAngle, float yAngle, float zAngle)
         {
             Quaternion rotation = QuaternionExtensions.Euler(xAngle, yAngle, zAngle);
-            transform.localRotation = transform.localRotation * rotation;
+            this.localRotation = this.localRotation * rotation;
         }
 
         /// <summary>
         /// Rotate the transform by a Vector3 of Euler angles
         /// </summary>
-        public static void Rotate(this Transform transform, Vector3 eulerAngles)
+        public void Rotate(Vector3 eulerAngles)
         {
-            Rotate(transform, eulerAngles.x, eulerAngles.y, eulerAngles.z);
+            Rotate(eulerAngles.x, eulerAngles.y, eulerAngles.z);
         }
 
         /// <summary>
         /// Rotate around the given axis by the specified angle in degrees
         /// </summary>
-        public static void RotateAround(this Transform transform, Vector3 point, Vector3 axis, float angle)
+        public void RotateAround(Vector3 point, Vector3 axis, float angle)
         {
-            Vector3 pos = transform.position;
+            Vector3 pos = this.position;
 
             // Move to origin relative to point
             Vector3 diff = new Vector3(pos.x - point.x, pos.y - point.y, pos.z - point.z);
@@ -220,68 +222,68 @@ namespace EngineCore.ECS
             Vector3 rotatedDiff = rotation * diff;
 
             // Move back
-            transform.position = new Vector3(
+            this.position = new Vector3(
                 point.x + rotatedDiff.x,
                 point.y + rotatedDiff.y,
                 point.z + rotatedDiff.z
             );
 
             // Also rotate the object itself
-            transform.rotation = transform.rotation * rotation;
+            this.rotation = this.rotation * rotation;
         }
 
         /// <summary>
         /// Make the transform look at a target position
         /// </summary>
-        public static void LookAt(this Transform transform, Vector3 target, Vector3 worldUp)
+        public void LookAt(Vector3 target, Vector3 worldUp)
         {
             Vector3 forward = new Vector3(
-                target.x - transform.position.x,
-                target.y - transform.position.y,
-                target.z - transform.position.z
+                target.x - this.position.x,
+                target.y - this.position.y,
+                target.z - this.position.z
             );
 
-            transform.rotation = QuaternionExtensions.LookRotation(forward, worldUp);
+            this.rotation = QuaternionExtensions.LookRotation(forward, worldUp);
         }
 
         /// <summary>
         /// Make the transform look at a target position (default up vector)
         /// </summary>
-        public static void LookAt(this Transform transform, Vector3 target)
+        public void LookAt(Vector3 target)
         {
-            LookAt(transform, target, Vector3.Up);
+            LookAt(target, Vector3.Up);
         }
 
         /// <summary>
         /// Make the transform look at another transform
         /// </summary>
-        public static void LookAt(this Transform transform, Transform target)
+        public void LookAt(Transform target)
         {
-            LookAt(transform, target.position, Vector3.Up);
+            LookAt(target.position, Vector3.Up);
         }
 
         /// <summary>
         /// Translate the transform in the direction and distance of translation
         /// </summary>
-        public static void Translate(this Transform transform, Vector3 translation, bool relativeTo = true)
+        public void Translate(Vector3 translation, bool relativeTo = true)
         {
             if (relativeTo)
             {
                 // Local space translation
-                Vector3 rotated = transform.rotation * translation;
-                transform.position = new Vector3(
-                    transform.position.x + rotated.x,
-                    transform.position.y + rotated.y,
-                    transform.position.z + rotated.z
+                Vector3 rotated = this.rotation * translation;
+                this.position = new Vector3(
+                    this.position.x + rotated.x,
+                    this.position.y + rotated.y,
+                    this.position.z + rotated.z
                 );
             }
             else
             {
                 // World space translation
-                transform.position = new Vector3(
-                    transform.position.x + translation.x,
-                    transform.position.y + translation.y,
-                    transform.position.z + translation.z
+                this.position = new Vector3(
+                    this.position.x + translation.x,
+                    this.position.y + translation.y,
+                    this.position.z + translation.z
                 );
             }
         }
@@ -289,87 +291,87 @@ namespace EngineCore.ECS
         /// <summary>
         /// Translate the transform in the direction and distance
         /// </summary>
-        public static void Translate(this Transform transform, float x, float y, float z, bool relativeTo = true)
+        public void Translate(float x, float y, float z, bool relativeTo = true)
         {
-            Translate(transform, new Vector3(x, y, z), relativeTo);
+            Translate(new Vector3(x, y, z), relativeTo);
         }
 
         /// <summary>
         /// Transform a direction from local space to world space
         /// </summary>
-        public static Vector3 TransformDirection(this Transform transform, Vector3 direction)
+        public Vector3 TransformDirection(Vector3 direction)
         {
-            return transform.rotation * direction;
+            return this.rotation * direction;
         }
 
         /// <summary>
         /// Transform a direction from world space to local space
         /// </summary>
-        public static Vector3 InverseTransformDirection(this Transform transform, Vector3 direction)
+        public Vector3 InverseTransformDirection(Vector3 direction)
         {
-            return Quaternion.Inverse(transform.rotation) * direction;
+            return Quaternion.Inverse(this.rotation) * direction;
         }
 
         /// <summary>
         /// Transform a point from local space to world space
         /// </summary>
-        public static Vector3 TransformPoint(this Transform transform, Vector3 point)
+        public Vector3 TransformPoint(Vector3 point)
         {
-            Vector3 rotated = transform.rotation * new Vector3(
-                point.x * transform.localScale.x,
-                point.y * transform.localScale.y,
-                point.z * transform.localScale.z
+            Vector3 rotated = this.rotation * new Vector3(
+                point.x * this.localScale.x,
+                point.y * this.localScale.y,
+                point.z * this.localScale.z
             );
 
             return new Vector3(
-                transform.position.x + rotated.x,
-                transform.position.y + rotated.y,
-                transform.position.z + rotated.z
+                this.position.x + rotated.x,
+                this.position.y + rotated.y,
+                this.position.z + rotated.z
             );
         }
 
         /// <summary>
         /// Transform a point from world space to local space
         /// </summary>
-        public static Vector3 InverseTransformPoint(this Transform transform, Vector3 point)
+        public Vector3 InverseTransformPoint(Vector3 point)
         {
             Vector3 diff = new Vector3(
-                point.x - transform.position.x,
-                point.y - transform.position.y,
-                point.z - transform.position.z
+                point.x - this.position.x,
+                point.y - this.position.y,
+                point.z - this.position.z
             );
 
-            Vector3 rotated = Quaternion.Inverse(transform.rotation) * diff;
+            Vector3 rotated = Quaternion.Inverse(this.rotation) * diff;
 
             return new Vector3(
-                rotated.x / transform.localScale.x,
-                rotated.y / transform.localScale.y,
-                rotated.z / transform.localScale.z
+                rotated.x / this.localScale.x,
+                rotated.y / this.localScale.y,
+                rotated.z / this.localScale.z
             );
         }
 
         /// <summary>
         /// Get the Euler angles of the rotation in degrees
         /// </summary>
-        public static Vector3 GetEulerAngles(this Transform transform)
+        public Vector3 GetEulerAngles()
         {
-            return QuaternionToEuler(transform.localRotation);
+            return QuaternionToEuler(this.localRotation);
         }
 
         /// <summary>
         /// Set the rotation using Euler angles in degrees
         /// </summary>
-        public static void SetEulerAngles(this Transform transform, float x, float y, float z)
+        public void SetEulerAngles(float x, float y, float z)
         {
-            transform.localRotation = QuaternionExtensions.Euler(x, y, z);
+            this.localRotation = QuaternionExtensions.Euler(x, y, z);
         }
 
         /// <summary>
         /// Set the rotation using Euler angles vector
         /// </summary>
-        public static void SetEulerAngles(this Transform transform, Vector3 eulerAngles)
+        public void SetEulerAngles(Vector3 eulerAngles)
         {
-            transform.localRotation = QuaternionExtensions.Euler(eulerAngles);
+            this.localRotation = QuaternionExtensions.Euler(eulerAngles);
         }
 
         // Helper to convert quaternion to Euler angles

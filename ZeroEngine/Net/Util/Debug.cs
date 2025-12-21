@@ -4,6 +4,7 @@ using OpenTK.Graphics.OpenGL4;
 using OpenTK.Mathematics;
 using EngineCore.ECS;
 using EngineCore.Rendering;
+using ECSVector3 = EngineCore.ECS.Vector3;
 
 namespace EngineCore
 {
@@ -19,8 +20,8 @@ namespace EngineCore
 
         private struct DebugLine
         {
-            public Vector3 Start;
-            public Vector3 End;
+            public OpenTK.Mathematics.Vector3 Start;
+            public OpenTK.Mathematics.Vector3 End;
             public Color4 Color;
             public float Duration;
             public float TimeRemaining;
@@ -109,12 +110,12 @@ void main()
         /// <summary>
         /// Draw a line in 3D space
         /// </summary>
-        public static void DrawLine(Vector3 start, Vector3 end, Color4 color, float duration = 0f)
+        public static void DrawLine(ECSVector3 start, ECSVector3 end, Color4 color, float duration = 0f)
         {
             _lines.Add(new DebugLine
             {
-                Start = start,
-                End = end,
+                Start = new OpenTK.Mathematics.Vector3(start.x, start.y, start.z),
+                End = new OpenTK.Mathematics.Vector3(end.x, end.y, end.z),
                 Color = color,
                 Duration = duration,
                 TimeRemaining = duration
@@ -124,7 +125,7 @@ void main()
         /// <summary>
         /// Draw a line in 3D space (convenience overload)
         /// </summary>
-        public static void DrawLine(Vector3 start, Vector3 end)
+        public static void DrawLine(ECSVector3 start, ECSVector3 end)
         {
             DrawLine(start, end, Color4.White, 0f);
         }
@@ -132,9 +133,9 @@ void main()
         /// <summary>
         /// Draw a ray from start in direction
         /// </summary>
-        public static void DrawRay(Vector3 start, Vector3 direction, Color4 color, float duration = 0f)
+        public static void DrawRay(ECSVector3 start, ECSVector3 direction, Color4 color, float duration = 0f)
         {
-            DrawLine(start, new Vector3(
+            DrawLine(start, new ECSVector3(
                 start.x + direction.x,
                 start.y + direction.y,
                 start.z + direction.z
@@ -144,7 +145,7 @@ void main()
         /// <summary>
         /// Draw a ray from start in direction (convenience overload)
         /// </summary>
-        public static void DrawRay(Vector3 start, Vector3 direction)
+        public static void DrawRay(ECSVector3 start, ECSVector3 direction)
         {
             DrawRay(start, direction, Color4.White, 0f);
         }
@@ -152,21 +153,21 @@ void main()
         /// <summary>
         /// Draw a wireframe box
         /// </summary>
-        public static void DrawWireBox(Vector3 center, Vector3 size, Color4 color, float duration = 0f)
+        public static void DrawWireBox(ECSVector3 center, ECSVector3 size, Color4 color, float duration = 0f)
         {
-            Vector3 halfSize = new Vector3(size.x * 0.5f, size.y * 0.5f, size.z * 0.5f);
+            ECSVector3 halfSize = new ECSVector3(size.x * 0.5f, size.y * 0.5f, size.z * 0.5f);
 
             // Bottom face
-            Vector3 v0 = new Vector3(center.x - halfSize.x, center.y - halfSize.y, center.z - halfSize.z);
-            Vector3 v1 = new Vector3(center.x + halfSize.x, center.y - halfSize.y, center.z - halfSize.z);
-            Vector3 v2 = new Vector3(center.x + halfSize.x, center.y - halfSize.y, center.z + halfSize.z);
-            Vector3 v3 = new Vector3(center.x - halfSize.x, center.y - halfSize.y, center.z + halfSize.z);
+            ECSVector3 v0 = new ECSVector3(center.x - halfSize.x, center.y - halfSize.y, center.z - halfSize.z);
+            ECSVector3 v1 = new ECSVector3(center.x + halfSize.x, center.y - halfSize.y, center.z - halfSize.z);
+            ECSVector3 v2 = new ECSVector3(center.x + halfSize.x, center.y - halfSize.y, center.z + halfSize.z);
+            ECSVector3 v3 = new ECSVector3(center.x - halfSize.x, center.y - halfSize.y, center.z + halfSize.z);
 
             // Top face
-            Vector3 v4 = new Vector3(center.x - halfSize.x, center.y + halfSize.y, center.z - halfSize.z);
-            Vector3 v5 = new Vector3(center.x + halfSize.x, center.y + halfSize.y, center.z - halfSize.z);
-            Vector3 v6 = new Vector3(center.x + halfSize.x, center.y + halfSize.y, center.z + halfSize.z);
-            Vector3 v7 = new Vector3(center.x - halfSize.x, center.y + halfSize.y, center.z + halfSize.z);
+            ECSVector3 v4 = new ECSVector3(center.x - halfSize.x, center.y + halfSize.y, center.z - halfSize.z);
+            ECSVector3 v5 = new ECSVector3(center.x + halfSize.x, center.y + halfSize.y, center.z - halfSize.z);
+            ECSVector3 v6 = new ECSVector3(center.x + halfSize.x, center.y + halfSize.y, center.z + halfSize.z);
+            ECSVector3 v7 = new ECSVector3(center.x - halfSize.x, center.y + halfSize.y, center.z + halfSize.z);
 
             // Bottom
             DrawLine(v0, v1, color, duration);
@@ -190,7 +191,7 @@ void main()
         /// <summary>
         /// Draw a wireframe sphere (simplified as 3 circles)
         /// </summary>
-        public static void DrawWireSphere(Vector3 center, float radius, Color4 color, float duration = 0f)
+        public static void DrawWireSphere(ECSVector3 center, float radius, Color4 color, float duration = 0f)
         {
             int segments = 16;
             float angleStep = MathF.PI * 2f / segments;
@@ -201,12 +202,12 @@ void main()
                 float angle1 = i * angleStep;
                 float angle2 = (i + 1) * angleStep;
 
-                Vector3 p1 = new Vector3(
+                ECSVector3 p1 = new ECSVector3(
                     center.x + MathF.Cos(angle1) * radius,
                     center.y + MathF.Sin(angle1) * radius,
                     center.z
                 );
-                Vector3 p2 = new Vector3(
+                ECSVector3 p2 = new ECSVector3(
                     center.x + MathF.Cos(angle2) * radius,
                     center.y + MathF.Sin(angle2) * radius,
                     center.z
@@ -220,12 +221,12 @@ void main()
                 float angle1 = i * angleStep;
                 float angle2 = (i + 1) * angleStep;
 
-                Vector3 p1 = new Vector3(
+                ECSVector3 p1 = new ECSVector3(
                     center.x + MathF.Cos(angle1) * radius,
                     center.y,
                     center.z + MathF.Sin(angle1) * radius
                 );
-                Vector3 p2 = new Vector3(
+                ECSVector3 p2 = new ECSVector3(
                     center.x + MathF.Cos(angle2) * radius,
                     center.y,
                     center.z + MathF.Sin(angle2) * radius
@@ -239,12 +240,12 @@ void main()
                 float angle1 = i * angleStep;
                 float angle2 = (i + 1) * angleStep;
 
-                Vector3 p1 = new Vector3(
+                ECSVector3 p1 = new ECSVector3(
                     center.x,
                     center.y + MathF.Cos(angle1) * radius,
                     center.z + MathF.Sin(angle1) * radius
                 );
-                Vector3 p2 = new Vector3(
+                ECSVector3 p2 = new ECSVector3(
                     center.x,
                     center.y + MathF.Cos(angle2) * radius,
                     center.z + MathF.Sin(angle2) * radius
@@ -268,18 +269,18 @@ void main()
             foreach (var line in _lines)
             {
                 // Start vertex
-                vertices[index++] = line.Start.x;
-                vertices[index++] = line.Start.y;
-                vertices[index++] = line.Start.z;
+                vertices[index++] = line.Start.X;
+                vertices[index++] = line.Start.Y;
+                vertices[index++] = line.Start.Z;
                 vertices[index++] = line.Color.R;
                 vertices[index++] = line.Color.G;
                 vertices[index++] = line.Color.B;
                 vertices[index++] = line.Color.A;
 
                 // End vertex
-                vertices[index++] = line.End.x;
-                vertices[index++] = line.End.y;
-                vertices[index++] = line.End.z;
+                vertices[index++] = line.End.X;
+                vertices[index++] = line.End.Y;
+                vertices[index++] = line.End.Z;
                 vertices[index++] = line.Color.R;
                 vertices[index++] = line.Color.G;
                 vertices[index++] = line.Color.B;

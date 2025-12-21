@@ -92,20 +92,16 @@ namespace EngineCore.Input
     /// </summary>
     public static class Input
     {
-        private static KeyboardState _currentKeyboard;
-        private static KeyboardState _previousKeyboard;
+        private static KeyboardState _currentKeyboard = default!;
+        private static KeyboardState _previousKeyboard = default!;
         
-        private static MouseState _currentMouse;
-        private static MouseState _previousMouse;
+        private static MouseState _currentMouse = default!;
+        private static MouseState _previousMouse = default!;
         
         private static Vector2 _mousePosition;
         private static Vector2 _previousMousePosition;
         private static Vector2 _mouseDelta;
         private static Vector2 _mouseScroll;
-        
-        // Gamepad support
-        private static readonly Dictionary<int, GamepadState> _currentGamepads = new Dictionary<int, GamepadState>();
-        private static readonly Dictionary<int, GamepadState> _previousGamepads = new Dictionary<int, GamepadState>();
 
         // ==================== INITIALIZATION ====================
 
@@ -138,9 +134,6 @@ namespace EngineCore.Input
             _mousePosition = new Vector2(mouse.X, mouse.Y);
             _mouseDelta = _mousePosition - _previousMousePosition;
             _mouseScroll = mouse.ScrollDelta;
-            
-            // Update gamepad states
-            UpdateGamepads();
         }
 
         // ==================== KEYBOARD INPUT ====================
@@ -239,121 +232,11 @@ namespace EngineCore.Input
                    _previousMouse.IsButtonDown((OpenTK.Windowing.GraphicsLibraryFramework.MouseButton)button);
         }
 
-        // ==================== GAMEPAD/CONTROLLER INPUT ====================
-
-        private static void UpdateGamepads()
-        {
-            // Store previous states
-            _previousGamepads.Clear();
-            foreach (var kvp in _currentGamepads)
-            {
-                _previousGamepads[kvp.Key] = kvp.Value;
-            }
-            
-            // Update current states for all connected joysticks
-            for (int i = 0; i < 16; i++) // Check up to 16 controllers
-            {
-                var state = Joysticks.GetState(i);
-                if (state.IsConnected)
-                {
-                    _currentGamepads[i] = state;
-                }
-                else if (_currentGamepads.ContainsKey(i))
-                {
-                    _currentGamepads.Remove(i);
-                }
-            }
-        }
-
-        /// <summary>
-        /// Check if a gamepad is connected
-        /// </summary>
-        public static bool IsGamepadConnected(int gamepadIndex = 0)
-        {
-            return _currentGamepads.ContainsKey(gamepadIndex);
-        }
-
-        /// <summary>
-        /// Get the number of connected gamepads
-        /// </summary>
-        public static int GamepadCount => _currentGamepads.Count;
-
-        /// <summary>
-        /// Get gamepad button state
-        /// </summary>
-        public static bool GetGamepadButton(int gamepadIndex, int button)
-        {
-            if (!_currentGamepads.TryGetValue(gamepadIndex, out var state))
-                return false;
-            
-            if (button < 0 || button >= state.GetButtonCount())
-                return false;
-            
-            return state.GetButton(button) == ButtonState.Pressed;
-        }
-
-        /// <summary>
-        /// Get gamepad button pressed this frame
-        /// </summary>
-        public static bool GetGamepadButtonDown(int gamepadIndex, int button)
-        {
-            if (!_currentGamepads.TryGetValue(gamepadIndex, out var current))
-                return false;
-            
-            if (button < 0 || button >= current.GetButtonCount())
-                return false;
-            
-            bool currentPressed = current.GetButton(button) == ButtonState.Pressed;
-            
-            if (!_previousGamepads.TryGetValue(gamepadIndex, out var previous))
-                return currentPressed;
-            
-            bool previousPressed = previous.GetButton(button) == ButtonState.Pressed;
-            
-            return currentPressed && !previousPressed;
-        }
-
-        /// <summary>
-        /// Get gamepad axis value (-1 to 1)
-        /// </summary>
-        public static float GetGamepadAxis(int gamepadIndex, int axis)
-        {
-            if (!_currentGamepads.TryGetValue(gamepadIndex, out var state))
-                return 0f;
-            
-            if (axis < 0 || axis >= state.GetAxisCount())
-                return 0f;
-            
-            return state.GetAxis(axis);
-        }
-
-        /// <summary>
-        /// Get left stick on gamepad (X and Y from -1 to 1)
-        /// </summary>
-        public static Vector2 GetGamepadLeftStick(int gamepadIndex = 0)
-        {
-            return new Vector2(
-                GetGamepadAxis(gamepadIndex, 0), // Left stick X
-                GetGamepadAxis(gamepadIndex, 1)  // Left stick Y
-            );
-        }
-
-        /// <summary>
-        /// Get right stick on gamepad (X and Y from -1 to 1)
-        /// </summary>
-        public static Vector2 GetGamepadRightStick(int gamepadIndex = 0)
-        {
-            return new Vector2(
-                GetGamepadAxis(gamepadIndex, 2), // Right stick X
-                GetGamepadAxis(gamepadIndex, 3)  // Right stick Y
-            );
-        }
-
         // ==================== CONVENIENCE METHODS ====================
 
         /// <summary>
         /// Get horizontal input axis (-1 to 1)
-        /// Combines keyboard (A/D or Left/Right arrows) and gamepad left stick
+        /// Keyboard only (A/D or Left/Right arrows)
         /// </summary>
         public static float GetAxisHorizontal()
         {
@@ -363,20 +246,12 @@ namespace EngineCore.Input
             if (GetKey(KeyCode.D) || GetKey(KeyCode.RightArrow)) value += 1f;
             if (GetKey(KeyCode.A) || GetKey(KeyCode.LeftArrow)) value -= 1f;
             
-            // Gamepad (if connected)
-            if (IsGamepadConnected(0))
-            {
-                float stick = GetGamepadLeftStick(0).X;
-                if (MathF.Abs(stick) > 0.1f) // Deadzone
-                    value = stick;
-            }
-            
-            return MathHelper.Clamp(value, -1f, 1f);
+            return OpenTK.Mathematics.MathHelper.Clamp(value, -1f, 1f);
         }
 
         /// <summary>
         /// Get vertical input axis (-1 to 1)
-        /// Combines keyboard (W/S or Up/Down arrows) and gamepad left stick
+        /// Keyboard only (W/S or Up/Down arrows)
         /// </summary>
         public static float GetAxisVertical()
         {
@@ -386,15 +261,7 @@ namespace EngineCore.Input
             if (GetKey(KeyCode.W) || GetKey(KeyCode.UpArrow)) value += 1f;
             if (GetKey(KeyCode.S) || GetKey(KeyCode.DownArrow)) value -= 1f;
             
-            // Gamepad (if connected)
-            if (IsGamepadConnected(0))
-            {
-                float stick = GetGamepadLeftStick(0).Y;
-                if (MathF.Abs(stick) > 0.1f) // Deadzone
-                    value = stick;
-            }
-            
-            return MathHelper.Clamp(value, -1f, 1f);
+            return OpenTK.Mathematics.MathHelper.Clamp(value, -1f, 1f);
         }
     }
 }

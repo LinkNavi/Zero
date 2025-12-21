@@ -12,7 +12,7 @@ namespace EngineCore.Audio
     public class AudioClip : IDisposable
     {
         internal int BufferId { get; set; }
-        public string Name { get; set; }
+        public string Name { get; set; } = string.Empty;
         public float Length { get; set; } // Duration in seconds
         public int SampleRate { get; set; }
         public int Channels { get; set; }
@@ -47,15 +47,16 @@ namespace EngineCore.Audio
             try
             {
                 // Open default audio device
-                _device = ALC.OpenDevice(null);
-                if (_device == IntPtr.Zero)
+                _device = ALC.OpenDevice(string.Empty);
+                
+                if (_device == ALDevice.Null)
                 {
                     Console.WriteLine("ERROR: Failed to open audio device");
                     return;
                 }
 
                 // Create audio context
-                _context = ALC.CreateContext(_device, (int[])null);
+                _context = ALC.CreateContext(_device, (int[]?)null);
                 if (_context == ALContext.Null)
                 {
                     Console.WriteLine("ERROR: Failed to create audio context");
@@ -89,10 +90,10 @@ namespace EngineCore.Audio
                 ALC.DestroyContext(_context);
                 _context = ALContext.Null;
             }
-            if (_device != IntPtr.Zero)
+            if (_device != ALDevice.Null)
             {
                 ALC.CloseDevice(_device);
-                _device = IntPtr.Zero;
+                _device = ALDevice.Null;
             }
 
             _initialized = false;
@@ -127,13 +128,13 @@ namespace EngineCore.Audio
                 forward.x, forward.y, forward.z,
                 up.x, up.y, up.z
             };
-            AL.Listener(ALListenerfv.Orientation, ref orientation);
+            AL.Listener(ALListenerfv.Orientation, orientation);
         }
 
         /// <summary>
         /// Load an audio clip from a WAV file
         /// </summary>
-        public static AudioClip LoadWav(string filePath)
+        public static AudioClip? LoadWav(string filePath)
         {
             if (!_initialized)
             {
@@ -258,6 +259,4 @@ namespace EngineCore.Audio
         /// </summary>
         public static bool IsInitialized => _initialized;
     }
-
-
 }

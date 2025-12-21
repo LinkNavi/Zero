@@ -254,7 +254,7 @@ namespace EngineCore.Components
             int frameCount = 0;
             if (frameCount++ % 60 == 0)
             {
-                Console.WriteLine($"Rendering {activeRenderers} objects (Total GameObjects: {scene.GetAllGameObjects().Length})");
+
             }
 
             // Step 5: Render all objects
