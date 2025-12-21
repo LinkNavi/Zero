@@ -1,3 +1,0 @@
-/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles/ZeroEngine.dir
-/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles/edit_cache.dir
-/home/kirby/Programming/Zero/ZeroEngine/.build/debug/CMakeFiles/rebuild_cache.dir

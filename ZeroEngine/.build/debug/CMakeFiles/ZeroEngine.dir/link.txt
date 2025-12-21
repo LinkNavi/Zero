@@ -1,2 +1,0 @@
-/usr/bin/ar qc libZeroEngine.a CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Rendering/Renderer.cpp.o CMakeFiles/ZeroEngine.dir/home/kirby/Programming/Zero/ZeroEngine/src/Scripting/ScriptSystem.cpp.o
-/usr/bin/ranlib libZeroEngine.a
