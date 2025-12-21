@@ -490,7 +490,7 @@ void main()
 }
 ";
         
-        public static string BasicFragmentShader = @"
+   public static string BasicFragmentShader = @"
 #version 330 core
 
 in vec3 FragPos;
@@ -501,17 +501,16 @@ in vec4 Color;
 out vec4 FragColor;
 
 uniform vec4 _Color;
-uniform sampler2D _MainTex;
 
 void main()
 {
     // Simple lighting
     vec3 lightDir = normalize(vec3(0.5, 1.0, 0.3));
-    float diff = max(dot(normalize(Normal), lightDir), 0.0);
+    float diff = max(dot(normalize(Normal), lightDir), 0.3);
     vec3 lighting = vec3(0.3 + 0.7 * diff); // Ambient + diffuse
     
-    vec4 texColor = texture(_MainTex, TexCoord);
-    FragColor = _Color * texColor * Color * vec4(lighting, 1.0);
+    // Use vertex color multiplied by material color
+    FragColor = _Color * Color * vec4(lighting, 1.0);
 }
 ";
     }

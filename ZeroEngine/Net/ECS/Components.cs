@@ -9,7 +9,7 @@ using EngineCore.Rendering;
 namespace EngineCore.Components
 {
     // ==================== CAMERA COMPONENT ====================
-    
+
     /// <summary>
     /// Camera component - Unity style
     /// Attach this to a GameObject to make it a camera
@@ -17,28 +17,28 @@ namespace EngineCore.Components
     public class CameraComponent : Component
     {
         private Camera _camera;
-        
+
         // Camera settings
         public float fieldOfView = 60f;
         public float nearClipPlane = 0.1f;
         public float farClipPlane = 1000f;
         public Color4 backgroundColor = new Color4(0.2f, 0.3f, 0.4f, 1.0f);
-        
+
         // Projection type
         public enum ProjectionType { Perspective, Orthographic }
         public ProjectionType projectionType = ProjectionType.Perspective;
-        
+
         // Orthographic settings
         public float orthographicSize = 5f;
-        
+
         // Render order (lower renders first)
         public int depth = 0;
-        
+
         public CameraComponent()
         {
             _camera = new Camera();
         }
-        
+
         /// <summary>
         /// Get the internal Camera object for rendering
         /// </summary>
@@ -47,33 +47,34 @@ namespace EngineCore.Components
             UpdateCameraFromTransform();
             return _camera;
         }
-        
+
         /// <summary>
         /// Sync the camera with the GameObject's transform
         /// </summary>
+
         private void UpdateCameraFromTransform()
         {
-            // Use the GameObject's transform position and rotation
+            // Use the GameObject's transform position
             _camera.Position = new OpenTK.Mathematics.Vector3(
                 transform.position.x,
                 transform.position.y,
                 transform.position.z
             );
-            
-            // Calculate forward vector from transform
-            var forward = transform.forward;
-            _camera.Target = _camera.Position + new OpenTK.Mathematics.Vector3(forward.x, forward.y, forward.z);
-            
-            // Use transform's up vector
-            var up = transform.up;
-            _camera.Up = new OpenTK.Mathematics.Vector3(up.x, up.y, up.z);
-            
+
+            // FIX: Make camera look toward negative Z (standard OpenGL convention)
+            // When camera is at (0, 2, 5), it should look at (0, 2, 0) or lower Z values
+            _camera.Target = _camera.Position + new OpenTK.Mathematics.Vector3(0, 0, -1);
+
+            // Standard up vector
+            _camera.Up = new OpenTK.Mathematics.Vector3(0, 1, 0);
+
             // Update camera settings
             _camera.FieldOfView = MathHelper.DegreesToRadians(fieldOfView);
             _camera.NearClip = nearClipPlane;
             _camera.FarClip = farClipPlane;
         }
-        
+
+
         /// <summary>
         /// Find the main camera in the scene (tagged "MainCamera")
         /// </summary>
@@ -86,9 +87,9 @@ namespace EngineCore.Components
             }
         }
     }
-    
+
     // ==================== MESH RENDERER COMPONENT ====================
-    
+
     /// <summary>
     /// MeshRenderer component - makes a GameObject visible
     /// Holds a reference to a Mesh and Material
@@ -97,64 +98,80 @@ namespace EngineCore.Components
     {
         public Mesh mesh;
         public Material material;
-        
+
         // Should this renderer cast shadows?
         public bool castShadows = true;
-        
+
         // Should this renderer receive shadows?
         public bool receiveShadows = true;
-        
+
         // Rendering layer (for selective rendering)
         public int renderLayer = 0;
-        
+
         public MeshRenderer()
         {
         }
-        
+
         public MeshRenderer(Mesh mesh, Material material)
         {
             this.mesh = mesh;
             this.material = material;
         }
-        
+
         /// <summary>
         /// Get the model matrix for this renderer (from Transform)
         /// </summary>
         public Matrix4 GetModelMatrix()
         {
             var t = transform;
-            
-            // Build transformation matrix: Scale * Rotation * Translation
+
+            // Build transformation matrix: Translation * Rotation * Scale
             var translation = Matrix4.CreateTranslation(t.position.x, t.position.y, t.position.z);
-            
-            // For now, use simple rotation (you'd want to convert from Quaternion properly)
-            var rotation = Matrix4.Identity; // Simplified - would use quaternion-to-matrix conversion
-            
+
+            // Convert quaternion to rotation matrix (proper implementation)
+            var q = t.localRotation;
+            float xx = q.x * q.x;
+            float yy = q.y * q.y;
+            float zz = q.z * q.z;
+            float xy = q.x * q.y;
+            float xz = q.x * q.z;
+            float yz = q.y * q.z;
+            float wx = q.w * q.x;
+            float wy = q.w * q.y;
+            float wz = q.w * q.z;
+
+            var rotation = new Matrix4(
+                1 - 2 * (yy + zz), 2 * (xy + wz), 2 * (xz - wy), 0,
+                2 * (xy - wz), 1 - 2 * (xx + zz), 2 * (yz + wx), 0,
+                2 * (xz + wy), 2 * (yz - wx), 1 - 2 * (xx + yy), 0,
+                0, 0, 0, 1
+            );
+
             var scale = Matrix4.CreateScale(t.localScale.x, t.localScale.y, t.localScale.z);
-            
+
             return scale * rotation * translation;
         }
     }
-    
+
     // ==================== LIGHT COMPONENT ====================
-    
+
     /// <summary>
     /// Light component - defines a light source
     /// </summary>
     public class Light : Component
     {
         public enum LightType { Directional, Point, Spot }
-        
+
         public LightType type = LightType.Directional;
         public Color4 color = Color4.White;
         public float intensity = 1.0f;
-        
+
         // Point/Spot light settings
         public float range = 10f;
-        
+
         // Spot light settings
         public float spotAngle = 45f;
-        
+
         /// <summary>
         /// Get the main directional light in the scene
         /// </summary>
@@ -165,7 +182,7 @@ namespace EngineCore.Components
                 // Find first directional light
                 var scene = Scene.Active;
                 if (scene == null) return null;
-                
+
                 foreach (var go in scene.GetAllGameObjects())
                 {
                     var light = go.GetComponent<Light>();
@@ -176,9 +193,9 @@ namespace EngineCore.Components
             }
         }
     }
-    
+
     // ==================== RENDERING SYSTEM ====================
-    
+
     /// <summary>
     /// RenderingSystem - manages the rendering pipeline
     /// Call Render() every frame to draw everything
@@ -187,13 +204,13 @@ namespace EngineCore.Components
     {
         private Renderer _renderer;
         private List<(MeshRenderer, Matrix4)> _renderQueue = new List<(MeshRenderer, Matrix4)>();
-        
+
         public RenderingSystem()
         {
             // We'll set the camera later
             _renderer = new Renderer(new Camera());
         }
-        
+
         /// <summary>
         /// Main render function - call this every frame
         /// </summary>
@@ -203,43 +220,50 @@ namespace EngineCore.Components
             CameraComponent cameraComponent = CameraComponent.Main;
             if (cameraComponent == null || !cameraComponent.enabled)
             {
-                // No active camera, can't render
+                Console.WriteLine("WARNING: No active camera found!");
                 return;
             }
-            
+
             Camera camera = cameraComponent.GetCamera();
             _renderer.SetCamera(camera);
-            
+
             // Step 2: Clear the screen
             var bgColor = cameraComponent.backgroundColor;
             _renderer.Clear(new Vector4(bgColor.R, bgColor.G, bgColor.B, bgColor.A));
-            
-            // Step 3: Build render queue - find all active MeshRenderers
+
+            // Step 3: Build render queue
             _renderQueue.Clear();
+            int activeRenderers = 0;
+
             foreach (var gameObject in scene.GetAllGameObjects())
             {
                 if (!gameObject.activeInHierarchy)
                     continue;
-                
+
                 var meshRenderer = gameObject.GetComponent<MeshRenderer>();
-                if (meshRenderer != null && meshRenderer.enabled && 
+                if (meshRenderer != null && meshRenderer.enabled &&
                     meshRenderer.mesh != null && meshRenderer.material != null)
                 {
                     var modelMatrix = meshRenderer.GetModelMatrix();
                     _renderQueue.Add((meshRenderer, modelMatrix));
+                    activeRenderers++;
                 }
             }
-            
-            // Step 4: Sort render queue (optional - by distance, layer, etc.)
-            // For now we just render in order
-            
+
+            // Debug output (only print once every 60 frames to avoid spam)
+            int frameCount = 0;
+            if (frameCount++ % 60 == 0)
+            {
+                Console.WriteLine($"Rendering {activeRenderers} objects (Total GameObjects: {scene.GetAllGameObjects().Length})");
+            }
+
             // Step 5: Render all objects
             foreach (var (meshRenderer, modelMatrix) in _renderQueue)
             {
                 _renderer.DrawMesh(meshRenderer.mesh, meshRenderer.material, modelMatrix);
             }
         }
-        
+
         /// <summary>
         /// Update aspect ratio when window resizes
         /// </summary>
@@ -252,9 +276,9 @@ namespace EngineCore.Components
             }
         }
     }
-    
+
     // ==================== MESH FILTER (Optional - Unity has this separate) ====================
-    
+
     /// <summary>
     /// MeshFilter - holds just the mesh data
     /// Unity separates MeshFilter (mesh data) and MeshRenderer (rendering)
@@ -263,11 +287,11 @@ namespace EngineCore.Components
     public class MeshFilter : Component
     {
         public Mesh mesh;
-        
+
         public MeshFilter()
         {
         }
-        
+
         public MeshFilter(Mesh mesh)
         {
             this.mesh = mesh;
@@ -280,7 +304,7 @@ namespace EngineCore.Components
 namespace EngineCore
 {
     using EngineCore.Components;
-    
+
     /// <summary>
     /// Main game class - integrates ECS with rendering
     /// This is what your Runtime or Editor would use
@@ -289,16 +313,16 @@ namespace EngineCore
     {
         private Scene _scene;
         private Components.RenderingSystem _renderingSystem;
-        
+
         // Timing
         private double _lastUpdateTime;
         private double _deltaTime;
-        
+
         public Game()
         {
             _renderingSystem = new RenderingSystem();
         }
-        
+
         /// <summary>
         /// Initialize the game
         /// </summary>
@@ -307,23 +331,23 @@ namespace EngineCore
             // Create and set up the scene
             _scene = new Scene("MainScene");
             _scene.SetActive();
-            
+
             // Example: Create a camera
             var cameraGO = _scene.CreateGameObject("Main Camera");
             cameraGO.tag = "MainCamera";
             var camera = cameraGO.AddComponent<CameraComponent>();
             camera.backgroundColor = new Color4(0.1f, 0.1f, 0.15f, 1.0f);
             cameraGO.transform.position = new ECS.Vector3(0, 2, 5);
-            
+
             // Example: Create a cube
             var cubeGO = _scene.CreateGameObject("Cube");
             var meshRenderer = cubeGO.AddComponent<MeshRenderer>();
-            
+
             // Set up the mesh and material
             // (You'd create these from your rendering system)
             // meshRenderer.mesh = Mesh.CreateCube();
             // meshRenderer.material = new Material(yourShader);
-            
+
             // Example: Create a light
             var lightGO = _scene.CreateGameObject("Directional Light");
             var light = lightGO.AddComponent<Light>();
@@ -332,7 +356,7 @@ namespace EngineCore
             light.intensity = 1.0f;
             lightGO.transform.localRotation = ECS.Quaternion.Identity; // Point down
         }
-        
+
         /// <summary>
         /// Update game logic (call every frame)
         /// </summary>
@@ -340,11 +364,11 @@ namespace EngineCore
         {
             _deltaTime = currentTime - _lastUpdateTime;
             _lastUpdateTime = currentTime;
-            
+
             // Update ECS (runs Update() on all MonoBehaviours)
             _scene?.Update();
         }
-        
+
         /// <summary>
         /// Late update (after Update, before Render)
         /// </summary>
@@ -352,7 +376,7 @@ namespace EngineCore
         {
             _scene?.LateUpdate();
         }
-        
+
         /// <summary>
         /// Render the scene (call after Update)
         /// </summary>
@@ -360,7 +384,7 @@ namespace EngineCore
         {
             _renderingSystem?.Render(_scene);
         }
-        
+
         /// <summary>
         /// Handle window resize
         /// </summary>
@@ -369,12 +393,12 @@ namespace EngineCore
             GL.Viewport(0, 0, width, height);
             _renderingSystem?.UpdateAspectRatio(width, height);
         }
-        
+
         /// <summary>
         /// Get delta time for this frame
         /// </summary>
         public double DeltaTime => _deltaTime;
-        
+
         /// <summary>
         /// Get the active scene
         /// </summary>

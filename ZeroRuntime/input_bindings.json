@@ -1,9 +1,0 @@
-
-{
-    "MoveForward": ["KEY_W", "KEY_UP"],
-    "MoveBackward": ["KEY_S", "KEY_DOWN"],
-    "MoveLeft": ["KEY_A", "KEY_LEFT"],
-    "MoveRight": ["KEY_D", "KEY_RIGHT"],
-    "Jump": ["KEY_SPACE"],
-    "Crouch": ["KEY_LEFT_SHIFT"]
-}
