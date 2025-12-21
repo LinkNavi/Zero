@@ -60,7 +60,7 @@ namespace EngineCore.Scripting
             _interface.RegisterVariable("position_x", () => transform.position.x, v =>
             {
                 var pos = transform.position;
-                pos.x = (float)v;
+                 pos.x = (float)v;
                 transform.position = pos;
             });
             _interface.RegisterVariable("position_y", () => transform.position.y, v =>
