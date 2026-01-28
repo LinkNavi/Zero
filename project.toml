@@ -1,4 +1,4 @@
-name = "ZeroPhysics"
+name = "Zero"
 version = "0.1.0"
 type = "exec"
 language = "cpp"
@@ -7,12 +7,12 @@ language = "cpp"
 dirs = ["src"]
 
 [includes]
-dirs = ["include"]
+dirs = ["include", "external"]
 
 [build]
 flags = ["-Wall", "-Wextra", "-Wpedantic"]
 optimization = "2"
-lib = ["raylib", "m", "pthread", "dl", "GL"]
+
 [deps]
 
 [scripts]

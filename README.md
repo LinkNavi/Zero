@@ -1,4 +1,4 @@
-# ZeroPhysics
+# Zero
 
 A C++ executable project
 
