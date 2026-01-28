@@ -7,12 +7,12 @@ language = "cpp"
 dirs = ["src"]
 
 [includes]
-dirs = ["include", "external"]
+dirs = ["include", "external","external/Vulkan-Headers/include"]
 
 [build]
 flags = ["-Wall", "-Wextra", "-Wpedantic"]
 optimization = "2"
-
+libs = ["glfw", "vulkan"]
 [deps]
 
 [scripts]

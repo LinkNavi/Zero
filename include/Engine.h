@@ -5,6 +5,8 @@
 #include <typeindex>
 #include <bitset>
 #include <queue>
+#include <cstdint>
+#include <algorithm>
 
 constexpr size_t MAX_COMPONENTS = 32;
 using ComponentMask = std::bitset<MAX_COMPONENTS>;
