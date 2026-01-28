@@ -2,17 +2,19 @@
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
 
+#include "Config.h"
 #include "Engine.h"
 #include "Renderer.h"
-#include "PipelineLit.h"  // CHANGED: Use LitPipeline instead of GraphicsPipeline
+#include "PipelineLit.h"
 #include "Mesh.h"
 #include "Camera.h"
 #include "Input.h"
 #include "CameraController.h"
+#include "Time.h"
 #include <iostream>
+#include <cstdlib>
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include <chrono>
 
 // Components
 struct Transform : Component {
@@ -51,10 +53,10 @@ struct MeshComponent : Component {
 class ECS;
 
 // Systems
-class PhysicsSystem : public System {
+class RotationSystem : public System {
 public:
     ECS* ecs;
-    PhysicsSystem() : ecs(nullptr) {}
+    RotationSystem() : ecs(nullptr) {}
     void update(float dt) override;
 };
 
@@ -62,16 +64,28 @@ class RenderSystem : public System {
 public:
     ECS* ecs;
     VulkanRenderer* renderer;
-    LitPipeline* pipeline;  // CHANGED: Use LitPipeline
+    LitPipeline* pipeline;
     Camera* camera;
     uint32_t width, height;
+    glm::vec3 lightDir;
+    glm::vec3 lightColor;
+    float ambientStrength;
     
-    RenderSystem() : ecs(nullptr), renderer(nullptr), pipeline(nullptr), camera(nullptr), width(0), height(0) {}
-    void update(float dt) override;
+    RenderSystem() : ecs(nullptr), renderer(nullptr), pipeline(nullptr), 
+                     camera(nullptr), width(0), height(0),
+                     lightDir(1, -1, 1), lightColor(1, 1, 1), 
+                     ambientStrength(0.3f) {}
+    
+    void update(float /*dt*/) override;
 };
 
 // System implementations
-void PhysicsSystem::update(float dt) {
+void RotationSystem::update(float dt) {
+    if (!ecs) {
+        std::cerr << "RotationSystem: ECS pointer is null!" << std::endl;
+        return;
+    }
+    
     for (EntityID entity : entities) {
         auto* transform = ecs->getComponent<Transform>(entity);
         auto* velocity = ecs->getComponent<Velocity>(entity);
@@ -83,11 +97,21 @@ void PhysicsSystem::update(float dt) {
     }
 }
 
-void RenderSystem::update(float dt) {
-    VkCommandBuffer cmd;
+void RenderSystem::update(float /*dt*/) {
+    // Safety checks
+    if (!renderer || !pipeline || !camera || !ecs) {
+        std::cerr << "RenderSystem: null pointer detected!" << std::endl;
+        return;
+    }
+    
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
     renderer->beginFrame(cmd);
     
-    // Set dynamic viewport and scissor
+    if (cmd == VK_NULL_HANDLE) {
+        std::cerr << "RenderSystem: Failed to get command buffer!" << std::endl;
+        return;
+    }
+    
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
@@ -102,10 +126,8 @@ void RenderSystem::update(float dt) {
     scissor.extent = {width, height};
     vkCmdSetScissor(cmd, 0, 1, &scissor);
     
-    // Bind pipeline
     pipeline->bind(cmd);
     
-    // Render entities
     glm::mat4 viewProj = camera->getViewProjectionMatrix();
     
     for (EntityID entity : entities) {
@@ -113,18 +135,15 @@ void RenderSystem::update(float dt) {
         auto* meshComp = ecs->getComponent<MeshComponent>(entity);
         
         if (transform && meshComp && meshComp->mesh) {
-            // Calculate matrices
             glm::mat4 model = transform->getMatrix();
             
-            // CHANGED: Use PushConstantsLit with lighting info
             PushConstantsLit push{};
             push.mvp = viewProj * model;
             push.model = model;
-            push.lightDir = glm::normalize(glm::vec3(1.0f, -1.0f, 1.0f)); // Light from top-right
-            push.lightColor = glm::vec3(1.0f, 1.0f, 1.0f); // White light
-            push.ambientStrength = 0.3f; // 30% ambient light
+            push.lightDir = glm::normalize(lightDir);
+            push.lightColor = lightColor;
+            push.ambientStrength = ambientStrength;
             
-            // Push constants and draw
             pipeline->pushConstants(cmd, push);
             meshComp->mesh->draw(cmd);
         }
@@ -134,90 +153,133 @@ void RenderSystem::update(float dt) {
 }
 
 int main() {
-    std::cout << "=== Zero Engine v0.2 - With Lighting! ===" << std::endl;
+    // Workaround for GTK icon loading issues on some systems
+    // This prevents the glycin/bwrap sandboxing error
+    setenv("GLYCIN_USE_SANDBOX", "0", 1);
+    setenv("GTK_DISABLE_VALIDATION", "1", 1);
+    
+    std::cout << "=== Zero Engine v0.3 - Enhanced Edition ===" << std::endl;
+    
+    // Load configuration
+    Config config;
+    if (!config.load("config.ini")) {
+        std::cout << "! Using default configuration" << std::endl;
+    } else {
+        std::cout << "✓ Configuration loaded" << std::endl;
+    }
+    
+    // Get settings from config
+    uint32_t width = config.get("window_width", 1280);
+    uint32_t height = config.get("window_height", 720);
+    std::string title = config.getString("window_title", "Zero Engine");
     
     // Initialize Vulkan Renderer
     VulkanRenderer renderer;
-    if (!renderer.init(1280, 720, "Zero Engine")) {
+    if (!renderer.init(width, height, title.c_str())) {
         std::cerr << "Failed to initialize renderer!" << std::endl;
         return -1;
     }
-    std::cout << "✓ Renderer initialized\n" << std::endl;
+    std::cout << "✓ Renderer initialized" << std::endl;
     
-    // Initialize input system
+    // Initialize Time
+    Time::init();
+    std::cout << "✓ Time system initialized" << std::endl;
+    
+    // Initialize input
     Input::init(renderer.getWindow());
     std::cout << "✓ Input system initialized" << std::endl;
     
-    // CHANGED: Create LitPipeline for lighting
-    std::cout << "Loading lit graphics pipeline..." << std::endl;
+    // Create lit pipeline
     LitPipeline pipeline;
-    if (!pipeline.init(renderer.getDevice(), renderer.getRenderPass(), 
+    std::cout << "Loading lit shaders from:" << std::endl;
+    std::cout << "  - shaders/vert_lit.spv" << std::endl;
+    std::cout << "  - shaders/frag_lit.spv" << std::endl;
+    
+    if (!pipeline.init(renderer.getDevice(), renderer.getRenderPass(),
                        "shaders/vert_lit.spv", "shaders/frag_lit.spv")) {
-        std::cerr << "Failed to create graphics pipeline!" << std::endl;
-        std::cerr << "Make sure to compile lit shaders:" << std::endl;
-        std::cerr << "  glslc shader_lit.vert -o shaders/vert_lit.spv" << std::endl;
-        std::cerr << "  glslc shader_lit.frag -o shaders/frag_lit.spv" << std::endl;
+        std::cerr << "\n=== SHADER LOADING FAILED ===" << std::endl;
+        std::cerr << "The shaders could not be loaded. This usually means:" << std::endl;
+        std::cerr << "1. Shader files don't exist" << std::endl;
+        std::cerr << "2. You're not running from the project root directory" << std::endl;
+        std::cerr << "3. Shaders haven't been compiled" << std::endl;
+        std::cerr << "\nTo fix this:" << std::endl;
+        std::cerr << "  1. Make sure you're in the project root directory" << std::endl;
+        std::cerr << "  2. Run: bash compile_shaders.sh" << std::endl;
+        std::cerr << "  3. Run the program again from the project root" << std::endl;
+        std::cerr << "\nSee TROUBLESHOOTING.md for more details." << std::endl;
+        renderer.cleanup();
         return -1;
     }
-    std::cout << "✓ Lit graphics pipeline created\n" << std::endl;
+    std::cout << "✓ Lit graphics pipeline created" << std::endl;
     
     // Create cube mesh
-    std::cout << "Creating cube mesh..." << std::endl;
     LitMesh cubeMesh;
     if (!cubeMesh.createCube(&renderer)) {
         std::cerr << "Failed to create cube mesh!" << std::endl;
         return -1;
     }
-    std::cout << "✓ Cube mesh created\n" << std::endl;
+    std::cout << "✓ Cube mesh created" << std::endl;
     
-    // Create camera with controller
+    // Create camera
     Camera camera;
-    camera.position = glm::vec3(0.0f, 2.0f, 8.0f);
-    camera.target = glm::vec3(0.0f, 0.0f, 0.0f);
-    camera.aspectRatio = 1280.0f / 720.0f;
+    camera.position = config.getVec3("camera_position", glm::vec3(0, 2, 8));
+    camera.target = glm::vec3(0);
+    camera.aspectRatio = (float)width / (float)height;
+    camera.fov = config.get("camera_fov", 45.0f);
+    camera.nearPlane = config.get("camera_near", 0.1f);
+    camera.farPlane = config.get("camera_far", 100.0f);
     
     CameraController cameraController(&camera);
-    cameraController.moveSpeed = 3.0f;
-    cameraController.mouseSensitivity = 0.15f;
+    cameraController.moveSpeed = config.get("camera_speed", 5.0f);
+    cameraController.sprintMultiplier = config.get("camera_sprint_multiplier", 2.0f);
+    cameraController.mouseSensitivity = config.get("camera_sensitivity", 0.15f);
     
-    std::cout << "✓ Camera system initialized\n" << std::endl;
+    std::cout << "✓ Camera system initialized" << std::endl;
     
     // Initialize ECS
     ECS ecs;
     ecs.registerComponent<Transform>();
     ecs.registerComponent<Velocity>();
     ecs.registerComponent<MeshComponent>();
-    std::cout << "✓ ECS initialized\n" << std::endl;
+    std::cout << "✓ ECS initialized (3 components registered)" << std::endl;
     
     // Create systems
-    auto physicsSystem = ecs.registerSystem<PhysicsSystem>();
-    physicsSystem->ecs = &ecs;
-    ComponentMask physicsMask;
-    physicsMask.set(0); // Transform
-    physicsMask.set(1); // Velocity
-    ecs.setSystemSignature<PhysicsSystem>(physicsMask);
+    auto rotationSystem = ecs.registerSystem<RotationSystem>();
+    rotationSystem->ecs = &ecs;
+    ComponentMask rotationMask;
+    rotationMask.set(0); // Transform
+    rotationMask.set(1); // Velocity
+    ecs.setSystemSignature<RotationSystem>(rotationMask);
+    std::cout << "✓ Rotation system registered" << std::endl;
     
     auto renderSystem = ecs.registerSystem<RenderSystem>();
     renderSystem->ecs = &ecs;
     renderSystem->renderer = &renderer;
     renderSystem->pipeline = &pipeline;
     renderSystem->camera = &camera;
-    renderSystem->width = 1280;
-    renderSystem->height = 720;
+    renderSystem->width = width;
+    renderSystem->height = height;
+    renderSystem->lightDir = config.getVec3("light_direction", glm::vec3(1, -1, 1));
+    renderSystem->lightColor = config.getVec3("light_color", glm::vec3(1));
+    renderSystem->ambientStrength = config.get("ambient_strength", 0.3f);
+    
     ComponentMask renderMask;
     renderMask.set(0); // Transform
     renderMask.set(2); // MeshComponent
     ecs.setSystemSignature<RenderSystem>(renderMask);
-    std::cout << "✓ Systems registered\n" << std::endl;
+    std::cout << "✓ Render system registered" << std::endl;
     
     // Create a grid of cubes
     std::cout << "Creating entity grid..." << std::endl;
-    for (int x = -5; x <= 5; x++) {
-        for (int z = -5; z <= 5; z++) {
+    int gridSize = config.get("grid_size", 5);
+    float spacing = config.get("grid_spacing", 2.5f);
+    
+    for (int x = -gridSize; x <= gridSize; x++) {
+        for (int z = -gridSize; z <= gridSize; z++) {
             EntityID cube = ecs.createEntity();
             float height = (x + z) * 0.2f;
             ecs.addComponent(cube, Transform(
-                glm::vec3(x * 2.5f, height, z * 2.5f), 
+                glm::vec3(x * spacing, height, z * spacing), 
                 glm::vec3(0.0f), 
                 glm::vec3(0.8f)
             ));
@@ -231,7 +293,7 @@ int main() {
         }
     }
     
-    std::cout << "✓ Created grid of cubes\n" << std::endl;
+    std::cout << "✓ Created " << ((gridSize * 2 + 1) * (gridSize * 2 + 1)) << " cubes\n" << std::endl;
     std::cout << "\n=== Controls ===" << std::endl;
     std::cout << "  WASD       - Move camera" << std::endl;
     std::cout << "  Space/Ctrl - Up/Down" << std::endl;
@@ -239,20 +301,27 @@ int main() {
     std::cout << "  Right Click - Toggle mouse look" << std::endl;
     std::cout << "  Scroll     - Zoom" << std::endl;
     std::cout << "  ESC        - Exit" << std::endl;
-    std::cout << "\n=== Starting render loop ===\n" << std::endl;
+    std::cout << "\n=== Starting render loop ===" << std::endl;
+    
+    // Performance settings
+    int maxFPS = config.get("max_fps", 0);
+    float targetFrameTime = (maxFPS > 0) ? (1.0f / maxFPS) : 0.0f;
     
     // Main loop
-    auto lastTime = std::chrono::high_resolution_clock::now();
-    float frameCount = 0;
+    int frameCount = 0;
     float fpsTimer = 0.0f;
+    bool showFPS = config.get("show_fps", 1);
     
     while (!renderer.shouldClose() && !Input::getKey(Key::Escape)) {
-        auto currentTime = std::chrono::high_resolution_clock::now();
-        float dt = std::chrono::duration<float>(currentTime - lastTime).count();
-        lastTime = currentTime;
+        Time::update();
+        float dt = Time::getDeltaTime();
         
-        // Cap delta time to prevent huge jumps
-        if (dt > 0.1f) dt = 0.1f;
+        // FPS limiting
+        if (targetFrameTime > 0.0f) {
+            while (Time::getRealDeltaTime() < targetFrameTime) {
+                // Busy wait
+            }
+        }
         
         // Update input
         Input::update();
@@ -261,27 +330,34 @@ int main() {
         // Update camera
         cameraController.update(dt, renderer.getWindow());
         
-        // FPS counter
-        frameCount++;
-        fpsTimer += dt;
-        if (fpsTimer >= 1.0f) {
-            std::cout << "FPS: " << (int)frameCount 
-                      << " | Frame time: " << (1000.0f/frameCount) << "ms"
-                      << " | Pos: (" << (int)camera.position.x << ", " 
-                      << (int)camera.position.y << ", " << (int)camera.position.z << ")"
-                      << std::endl;
-            frameCount = 0;
-            fpsTimer = 0.0f;
-        }
-        
         // Update systems
         ecs.updateSystems(dt);
+        
+        // FPS counter
+        if (showFPS) {
+            frameCount++;
+            fpsTimer += dt;
+            if (fpsTimer >= 1.0f) {
+                std::cout << "FPS: " << frameCount
+                          << " | Frame time: " << (1000.0f/frameCount) << "ms"
+                          << " | Pos: (" << (int)camera.position.x << ", "
+                          << (int)camera.position.y << ", " << (int)camera.position.z << ")"
+                          << std::endl;
+                frameCount = 0;
+                fpsTimer = 0.0f;
+            }
+        }
     }
     
     std::cout << "\n=== Shutting down ===" << std::endl;
+    
+    // Save config if changed
+    config.save("config.ini");
+    
     cubeMesh.cleanup();
     pipeline.cleanup();
     renderer.cleanup();
+    
     std::cout << "✓ Clean shutdown complete" << std::endl;
     
     return 0;
