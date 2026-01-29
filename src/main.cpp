@@ -5,7 +5,7 @@
 #include "Camera.h"
 #include "CameraController.h"
 #include "Config.h"
-#include "PipelineLit.h"
+#include "PipelineGLB.h"  // CHANGED: Was PipelineLit.h
 #include "Engine.h"
 #include "GLBLoader.h"
 #include "Input.h"
@@ -64,7 +64,7 @@ class GLBRenderSystem : public System {
 public:
     ECS* ecs;
     VulkanRenderer* renderer;
-    LitPipeline* pipeline;  // Change this
+    GLBPipeline* pipeline;  // CHANGED: Was LitPipeline*
     Camera* camera;
     uint32_t width, height;
     glm::vec3 lightDir;
@@ -72,7 +72,7 @@ public:
     float ambientStrength;
 
     GLBRenderSystem()
-        : ecs(nullptr), renderer(nullptr), pipeline(nullptr),  // Change this
+        : ecs(nullptr), renderer(nullptr), pipeline(nullptr),
           camera(nullptr), width(0), height(0), lightDir(1, -1, 1),
           lightColor(1, 1, 1), ambientStrength(0.3f) {}
 
@@ -80,7 +80,7 @@ public:
 };
 
 void GLBRenderSystem::update(float /*dt*/) {
-    if (!renderer || !camera || !ecs || !pipeline) {  // Add check
+    if (!renderer || !camera || !ecs || !pipeline) {
         std::cerr << "GLBRenderSystem: null pointer detected!" << std::endl;
         return;
     }
@@ -107,7 +107,7 @@ void GLBRenderSystem::update(float /*dt*/) {
     scissor.extent = {width, height};
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    pipeline->bind(cmd);  // Bind the pipeline
+    pipeline->bind(cmd);
 
     glm::mat4 viewProj = camera->getViewProjectionMatrix();
 
@@ -118,12 +118,27 @@ void GLBRenderSystem::update(float /*dt*/) {
         if (transform && glbComp && glbComp->model) {
             glm::mat4 model = transform->getMatrix();
 
-            PushConstantsLit push{};
+            // Get material properties from the first material in the model
+            glm::vec4 materialColor = glm::vec4(0.5f, 0.7f, 0.3f, 1.0f);  // Default tree green
+            float metallic = 0.0f;
+            float roughness = 0.8f;
+            
+            if (!glbComp->model->materials.empty()) {
+                const auto& mat = glbComp->model->materials[0];
+                materialColor = mat.baseColor;
+                metallic = mat.metallic;
+                roughness = mat.roughness;
+            }
+
+            PushConstantsGLB push{};
             push.mvp = viewProj * model;
             push.model = model;
             push.lightDir = glm::normalize(lightDir);
             push.lightColor = lightColor;
             push.ambientStrength = ambientStrength;
+            push.materialColor = materialColor;
+            push.materialMetallic = metallic;
+            push.materialRoughness = roughness;
 
             pipeline->pushConstants(cmd, push);
             glbComp->model->draw(cmd);
@@ -155,7 +170,7 @@ int main() {
     setenv("GLYCIN_USE_SANDBOX", "0", 1);
     setenv("GTK_DISABLE_VALIDATION", "1", 1);
 
-    std::cout << "=== Zero Engine v0.4 - GLB Model Loading ===" << std::endl;
+    std::cout << "=== Zero Engine v0.4 - GLB Model Loading (Fixed) ===" << std::endl;
 
     // Load configuration
     Config config;
@@ -165,8 +180,8 @@ int main() {
         std::cout << "✓ Configuration loaded" << std::endl;
     }
 
-    uint32_t width = config.get("window_width", 1280);
-    uint32_t height = config.get("window_height", 720);
+    uint32_t width = config.get("window_width", 960);   // CHANGED: Default reduced
+    uint32_t height = config.get("window_height", 540);  // CHANGED: Default reduced
     std::string title = config.getString("window_title", "Zero Engine");
 
     // Initialize Vulkan Renderer
@@ -194,18 +209,21 @@ int main() {
         renderer.cleanup();
         return -1;
     }
-
-     LitPipeline glbPipeline;
-std::cout << "Loading shaders for GLB rendering..." << std::endl;
-if (!glbPipeline.init(renderer.getDevice(), renderer.getRenderPass(),
-                     "shaders/vert_lit.spv", "shaders/frag_lit.spv")) {
-    std::cerr << "Failed to create GLB pipeline!" << std::endl;
-    renderer.cleanup();
-    return -1;
-}
-std::cout << "✓ GLB graphics pipeline created" << std::endl;
-
     std::cout << "✓ GLB model loaded" << std::endl;
+
+    // CHANGED: Create GLB-specific pipeline
+    GLBPipeline glbPipeline;
+    std::cout << "Loading GLB shaders..." << std::endl;
+    if (!glbPipeline.init(renderer.getDevice(), renderer.getRenderPass(),
+                         "shaders/vert_glb.spv", "shaders/frag_glb.spv")) {
+        std::cerr << "Failed to create GLB pipeline!" << std::endl;
+        std::cerr << "Did you compile the shaders? Run:" << std::endl;
+        std::cerr << "  glslc shader_glb.vert -o shaders/vert_glb.spv" << std::endl;
+        std::cerr << "  glslc shader_glb.frag -o shaders/frag_glb.spv" << std::endl;
+        renderer.cleanup();
+        return -1;
+    }
+    std::cout << "✓ GLB graphics pipeline created" << std::endl;
 
     // Create camera
     Camera camera;
@@ -244,12 +262,12 @@ std::cout << "✓ GLB graphics pipeline created" << std::endl;
     renderSystem->ecs = &ecs;
     renderSystem->renderer = &renderer;
     renderSystem->camera = &camera;
-renderSystem->pipeline = &glbPipeline;
+    renderSystem->pipeline = &glbPipeline;
     renderSystem->width = width;
     renderSystem->height = height;
     renderSystem->lightDir = config.getVec3("light_direction", glm::vec3(1, -1, 1));
     renderSystem->lightColor = config.getVec3("light_color", glm::vec3(1));
-    renderSystem->ambientStrength = config.get("ambient_strength", 0.3f);
+    renderSystem->ambientStrength = config.get("ambient_strength", 0.5f);  // CHANGED: Higher default
 
     ComponentMask renderMask;
     renderMask.set(0); // Transform
@@ -257,9 +275,9 @@ renderSystem->pipeline = &glbPipeline;
     ecs.setSystemSignature<GLBRenderSystem>(renderMask);
     std::cout << "✓ GLB Render system registered" << std::endl;
 
-    // Create a grid of trees
+    // Create a grid of trees - OPTIMIZED FOR CHROMEBOOK
     std::cout << "Creating tree grid..." << std::endl;
-    int gridSize = config.get("grid_size", 5);
+    int gridSize = config.get("grid_size", 2);  // CHANGED: Default reduced from 5 to 2
     float spacing = config.get("grid_spacing", 2.5f);
 
     for (int x = -gridSize; x <= gridSize; x++) {
@@ -294,7 +312,7 @@ renderSystem->pipeline = &glbPipeline;
     std::cout << "\n=== Starting render loop ===" << std::endl;
 
     // Performance settings
-    int maxFPS = config.get("max_fps", 0);
+    int maxFPS = config.get("max_fps", 30);  // CHANGED: Default 30 FPS for Chromebook
     float targetFrameTime = (maxFPS > 0) ? (1.0f / maxFPS) : 0.0f;
 
     // Main loop
@@ -339,7 +357,7 @@ renderSystem->pipeline = &glbPipeline;
     config.save("config.ini");
 
     treeModel.cleanup();
-glbPipeline.cleanup();
+    glbPipeline.cleanup();
     renderer.cleanup();
 
     std::cout << "✓ Clean shutdown complete" << std::endl;

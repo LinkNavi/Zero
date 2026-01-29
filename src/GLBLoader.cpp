@@ -2,342 +2,546 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "GLBLoader.h"
-#include <iostream>
 #include <cstring>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/type_ptr.hpp>
+#include <iostream>
 
-bool GLBModel::load(const std::string& filepath, VmaAllocator alloc, VkDevice dev, VkCommandPool pool, VkQueue queue) {
-    allocator = alloc;
-    device = dev;
-    commandPool = pool;
-    graphicsQueue = queue;
-    
-    tinygltf::Model model;
-    tinygltf::TinyGLTF loader;
-    std::string err, warn;
-    
-    bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, filepath);
-    
-    if (!warn.empty()) std::cout << "GLTF Warning: " << warn << std::endl;
-    if (!err.empty()) std::cerr << "GLTF Error: " << err << std::endl;
-    if (!ret) return false;
-    
-    // Load textures first
-    if (!loadTextures(model)) {
-        std::cerr << "Failed to load textures" << std::endl;
-        return false;
+bool GLBModel::load(const std::string &filepath, VmaAllocator alloc,
+                    VkDevice dev, VkCommandPool pool, VkQueue queue) {
+  allocator = alloc;
+  device = dev;
+  commandPool = pool;
+  graphicsQueue = queue;
+
+  tinygltf::Model model;
+  tinygltf::TinyGLTF loader;
+  std::string err, warn;
+
+  bool ret = loader.LoadBinaryFromFile(&model, &err, &warn, filepath);
+
+  if (!warn.empty())
+    std::cout << "GLTF Warning: " << warn << std::endl;
+  if (!err.empty())
+    std::cerr << "GLTF Error: " << err << std::endl;
+  if (!ret)
+    return false;
+
+  // Load textures first
+  if (!loadTextures(model)) {
+    std::cerr << "Failed to load textures" << std::endl;
+    return false;
+  }
+
+  // Load materials
+  materials.reserve(model.materials.size());
+  for (const auto &mat : model.materials) {
+    GLBMaterial material;
+
+    if (mat.values.find("baseColorFactor") != mat.values.end()) {
+      auto factor = mat.values.at("baseColorFactor").ColorFactor();
+      material.baseColor =
+          glm::vec4(factor[0], factor[1], factor[2], factor[3]);
     }
-    
-    // Load materials
-    for (const auto& mat : model.materials) {
-        GLBMaterial material;
-        
-        if (mat.values.find("baseColorFactor") != mat.values.end()) {
-            auto factor = mat.values.at("baseColorFactor").ColorFactor();
-            material.baseColor = glm::vec4(factor[0], factor[1], factor[2], factor[3]);
-        }
-        
-        if (mat.values.find("metallicFactor") != mat.values.end()) {
-            material.metallic = mat.values.at("metallicFactor").Factor();
-        }
-        
-        if (mat.values.find("roughnessFactor") != mat.values.end()) {
-            material.roughness = mat.values.at("roughnessFactor").Factor();
-        }
-        
-        if (mat.values.find("baseColorTexture") != mat.values.end()) {
-            material.baseColorTexture = mat.values.at("baseColorTexture").TextureIndex();
-        }
-        
-        materials.push_back(material);
+
+    if (mat.values.find("metallicFactor") != mat.values.end()) {
+      material.metallic =
+          static_cast<float>(mat.values.at("metallicFactor").Factor());
     }
-    
-    // Load meshes from scene
-    const tinygltf::Scene& scene = model.scenes[model.defaultScene];
-    for (int nodeIdx : scene.nodes) {
-        if (!processNode(model, model.nodes[nodeIdx])) {
-            return false;
-        }
+
+    if (mat.values.find("roughnessFactor") != mat.values.end()) {
+      material.roughness =
+          static_cast<float>(mat.values.at("roughnessFactor").Factor());
     }
-    
-    std::cout << "✓ Loaded GLB: " << filepath << " (" << meshes.size() << " meshes)" << std::endl;
-    return true;
+
+    if (mat.values.find("baseColorTexture") != mat.values.end()) {
+      material.baseColorTexture =
+          mat.values.at("baseColorTexture").TextureIndex();
+    }
+
+    materials.push_back(material);
+  }
+
+  // Load meshes from scene with proper transform hierarchy
+  const tinygltf::Scene &scene =
+      model.scenes[model.defaultScene > -1 ? model.defaultScene : 0];
+  glm::mat4 identity = glm::mat4(1.0f);
+
+  for (int nodeIdx : scene.nodes) {
+    if (!processNode(model, model.nodes[nodeIdx], identity)) {
+      return false;
+    }
+  }
+
+  std::cout << "✓ Loaded GLB: " << filepath << " (" << meshes.size()
+            << " meshes, " << materials.size() << " materials)" << std::endl;
+  return true;
 }
 
-bool GLBModel::processNode(const tinygltf::Model& model, const tinygltf::Node& node) {
-    if (node.mesh >= 0) {
-        if (!processMesh(model, model.meshes[node.mesh])) {
-            return false;
-        }
+bool GLBModel::processNode(const tinygltf::Model &model,
+                           const tinygltf::Node &node,
+                           glm::mat4 parentTransform) {
+  // Build node transform
+  glm::mat4 nodeTransform = parentTransform;
+
+  if (node.matrix.size() == 16) {
+    // Matrix is provided directly
+
+    nodeTransform =
+        parentTransform * glm::mat4(glm::make_mat4(node.matrix.data()));
+  } else {
+    // Build from TRS
+    glm::mat4 translation = glm::mat4(1.0f);
+    glm::mat4 rotation = glm::mat4(1.0f);
+    glm::mat4 scale = glm::mat4(1.0f);
+
+    if (node.translation.size() == 3) {
+      translation = glm::translate(
+          glm::mat4(1.0f), glm::vec3(node.translation[0], node.translation[1],
+                                     node.translation[2]));
     }
-    
-    for (int childIdx : node.children) {
-        if (!processNode(model, model.nodes[childIdx])) {
-            return false;
-        }
+
+    if (node.rotation.size() == 4) {
+      glm::quat q(static_cast<float>(node.rotation[3]), // w
+                  static_cast<float>(node.rotation[0]), // x
+                  static_cast<float>(node.rotation[1]), // y
+                  static_cast<float>(node.rotation[2])  // z
+      );
+      rotation = glm::mat4_cast(q);
     }
-    
-    return true;
+
+    if (node.scale.size() == 3) {
+      scale =
+          glm::scale(glm::mat4(1.0f),
+                     glm::vec3(node.scale[0], node.scale[1], node.scale[2]));
+    }
+
+    nodeTransform = parentTransform * translation * rotation * scale;
+  }
+
+  // Process mesh if present
+  if (node.mesh >= 0) {
+    if (!processMesh(model, model.meshes[node.mesh], nodeTransform)) {
+      return false;
+    }
+  }
+
+  // Process children recursively
+  for (int childIdx : node.children) {
+    if (!processNode(model, model.nodes[childIdx], nodeTransform)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
-bool GLBModel::processMesh(const tinygltf::Model& model, const tinygltf::Mesh& mesh) {
-    for (const auto& primitive : mesh.primitives) {
-        GLBMesh glbMesh;
-        std::vector<GLBVertex> vertices;
-        std::vector<uint32_t> indices;
-        
-        // Get positions
-        const tinygltf::Accessor& posAccessor = model.accessors[primitive.attributes.at("POSITION")];
-        const tinygltf::BufferView& posView = model.bufferViews[posAccessor.bufferView];
-        const float* positions = reinterpret_cast<const float*>(&model.buffers[posView.buffer].data[posView.byteOffset + posAccessor.byteOffset]);
-        
-        // Get normals
-        const float* normals = nullptr;
-        if (primitive.attributes.find("NORMAL") != primitive.attributes.end()) {
-            const tinygltf::Accessor& normAccessor = model.accessors[primitive.attributes.at("NORMAL")];
-            const tinygltf::BufferView& normView = model.bufferViews[normAccessor.bufferView];
-            normals = reinterpret_cast<const float*>(&model.buffers[normView.buffer].data[normView.byteOffset + normAccessor.byteOffset]);
-        }
-        
-        // Get UVs
-        const float* texCoords = nullptr;
-        if (primitive.attributes.find("TEXCOORD_0") != primitive.attributes.end()) {
-            const tinygltf::Accessor& uvAccessor = model.accessors[primitive.attributes.at("TEXCOORD_0")];
-            const tinygltf::BufferView& uvView = model.bufferViews[uvAccessor.bufferView];
-            texCoords = reinterpret_cast<const float*>(&model.buffers[uvView.buffer].data[uvView.byteOffset + uvAccessor.byteOffset]);
-        }
-        
-        // Build vertices
-        for (size_t i = 0; i < posAccessor.count; i++) {
-            GLBVertex vertex;
-            vertex.position = glm::vec3(positions[i * 3 + 0], positions[i * 3 + 1], positions[i * 3 + 2]);
-            vertex.normal = normals ? glm::vec3(normals[i * 3 + 0], normals[i * 3 + 1], normals[i * 3 + 2]) : glm::vec3(0, 1, 0);
-            vertex.texCoord = texCoords ? glm::vec2(texCoords[i * 2 + 0], texCoords[i * 2 + 1]) : glm::vec2(0);
-            vertices.push_back(vertex);
-        }
-        
-        // Get indices
-        const tinygltf::Accessor& indexAccessor = model.accessors[primitive.indices];
-        const tinygltf::BufferView& indexView = model.bufferViews[indexAccessor.bufferView];
-        const uint8_t* indexData = &model.buffers[indexView.buffer].data[indexView.byteOffset + indexAccessor.byteOffset];
-        
-        if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
-            const uint16_t* buf = reinterpret_cast<const uint16_t*>(indexData);
-            for (size_t i = 0; i < indexAccessor.count; i++) {
-                indices.push_back(buf[i]);
-            }
-        } else if (indexAccessor.componentType == TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
-            const uint32_t* buf = reinterpret_cast<const uint32_t*>(indexData);
-            for (size_t i = 0; i < indexAccessor.count; i++) {
-                indices.push_back(buf[i]);
-            }
-        }
-        
-        glbMesh.indexCount = static_cast<uint32_t>(indices.size());
-        glbMesh.materialIndex = primitive.material;
-        
-        // Create vertex buffer
-        VkDeviceSize vertexSize = sizeof(GLBVertex) * vertices.size();
-        VkBufferCreateInfo vertexBufferInfo{};
-        vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        vertexBufferInfo.size = vertexSize;
-        vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-        
-        VmaAllocationCreateInfo vertexAllocInfo{};
-        vertexAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-        
-        vmaCreateBuffer(allocator, &vertexBufferInfo, &vertexAllocInfo, &glbMesh.vertexBuffer, &glbMesh.vertexAllocation, nullptr);
-        
-        void* data;
-        vmaMapMemory(allocator, glbMesh.vertexAllocation, &data);
-        memcpy(data, vertices.data(), vertexSize);
-        vmaUnmapMemory(allocator, glbMesh.vertexAllocation);
-        
-        // Create index buffer
-        VkDeviceSize indexSize = sizeof(uint32_t) * indices.size();
-        VkBufferCreateInfo indexBufferInfo{};
-        indexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        indexBufferInfo.size = indexSize;
-        indexBufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
-        
-        VmaAllocationCreateInfo indexAllocInfo{};
-        indexAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-        
-        vmaCreateBuffer(allocator, &indexBufferInfo, &indexAllocInfo, &glbMesh.indexBuffer, &glbMesh.indexAllocation, nullptr);
-        
-        vmaMapMemory(allocator, glbMesh.indexAllocation, &data);
-        memcpy(data, indices.data(), indexSize);
-        vmaUnmapMemory(allocator, glbMesh.indexAllocation);
-        
-        meshes.push_back(glbMesh);
+bool GLBModel::processMesh(const tinygltf::Model &model,
+                           const tinygltf::Mesh &mesh, glm::mat4 transform) {
+  for (const auto &primitive : mesh.primitives) {
+    GLBMesh glbMesh;
+    std::vector<GLBVertex> vertices;
+    std::vector<uint32_t> indices;
+
+    // Get positions
+    if (primitive.attributes.find("POSITION") == primitive.attributes.end()) {
+      std::cerr << "Mesh primitive missing POSITION attribute!" << std::endl;
+      continue;
     }
-    
-    return true;
+
+    const tinygltf::Accessor &posAccessor =
+        model.accessors[primitive.attributes.at("POSITION")];
+    const tinygltf::BufferView &posView =
+        model.bufferViews[posAccessor.bufferView];
+    const float *positions = reinterpret_cast<const float *>(
+        &model.buffers[posView.buffer]
+             .data[posView.byteOffset + posAccessor.byteOffset]);
+
+    // Get normals
+    const float *normals = nullptr;
+    if (primitive.attributes.find("NORMAL") != primitive.attributes.end()) {
+      const tinygltf::Accessor &normAccessor =
+          model.accessors[primitive.attributes.at("NORMAL")];
+      const tinygltf::BufferView &normView =
+          model.bufferViews[normAccessor.bufferView];
+      normals = reinterpret_cast<const float *>(
+          &model.buffers[normView.buffer]
+               .data[normView.byteOffset + normAccessor.byteOffset]);
+    }
+
+    // Get UVs
+    const float *texCoords = nullptr;
+    if (primitive.attributes.find("TEXCOORD_0") != primitive.attributes.end()) {
+      const tinygltf::Accessor &uvAccessor =
+          model.accessors[primitive.attributes.at("TEXCOORD_0")];
+      const tinygltf::BufferView &uvView =
+          model.bufferViews[uvAccessor.bufferView];
+      texCoords = reinterpret_cast<const float *>(
+          &model.buffers[uvView.buffer]
+               .data[uvView.byteOffset + uvAccessor.byteOffset]);
+    }
+
+    // Build vertices with transform applied
+    glm::mat3 normalMatrix = glm::transpose(glm::inverse(glm::mat3(transform)));
+
+    for (size_t i = 0; i < posAccessor.count; i++) {
+      GLBVertex vertex;
+
+      // Transform position
+      glm::vec4 pos =
+          transform * glm::vec4(positions[i * 3 + 0], positions[i * 3 + 1],
+                                positions[i * 3 + 2], 1.0f);
+      vertex.position = glm::vec3(pos);
+
+      // Transform normal
+      if (normals) {
+        glm::vec3 normal = glm::normalize(
+            normalMatrix * glm::vec3(normals[i * 3 + 0], normals[i * 3 + 1],
+                                     normals[i * 3 + 2]));
+        vertex.normal = normal;
+      } else {
+        vertex.normal = glm::vec3(0, 1, 0);
+      }
+
+      // Texture coordinates
+      vertex.texCoord =
+          texCoords ? glm::vec2(texCoords[i * 2 + 0], texCoords[i * 2 + 1])
+                    : glm::vec2(0);
+
+      vertices.push_back(vertex);
+    }
+
+    // Get indices
+    if (primitive.indices >= 0) {
+      const tinygltf::Accessor &indexAccessor =
+          model.accessors[primitive.indices];
+      const tinygltf::BufferView &indexView =
+          model.bufferViews[indexAccessor.bufferView];
+      const uint8_t *indexData =
+          &model.buffers[indexView.buffer]
+               .data[indexView.byteOffset + indexAccessor.byteOffset];
+
+      indices.reserve(indexAccessor.count);
+
+      if (indexAccessor.componentType ==
+          TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT) {
+        const uint16_t *buf = reinterpret_cast<const uint16_t *>(indexData);
+        for (size_t i = 0; i < indexAccessor.count; i++) {
+          indices.push_back(buf[i]);
+        }
+      } else if (indexAccessor.componentType ==
+                 TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT) {
+        const uint32_t *buf = reinterpret_cast<const uint32_t *>(indexData);
+        for (size_t i = 0; i < indexAccessor.count; i++) {
+          indices.push_back(buf[i]);
+        }
+      } else if (indexAccessor.componentType ==
+                 TINYGLTF_COMPONENT_TYPE_UNSIGNED_BYTE) {
+        const uint8_t *buf = indexData;
+        for (size_t i = 0; i < indexAccessor.count; i++) {
+          indices.push_back(buf[i]);
+        }
+      }
+    } else {
+      // No indices, create them
+      for (size_t i = 0; i < vertices.size(); i++) {
+        indices.push_back(static_cast<uint32_t>(i));
+      }
+    }
+
+    glbMesh.indexCount = static_cast<uint32_t>(indices.size());
+    glbMesh.materialIndex = primitive.material;
+
+    // Create vertex buffer
+    VkDeviceSize vertexSize = sizeof(GLBVertex) * vertices.size();
+    VkBufferCreateInfo vertexBufferInfo{};
+    vertexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    vertexBufferInfo.size = vertexSize;
+    vertexBufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+
+    VmaAllocationCreateInfo vertexAllocInfo{};
+    vertexAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+    if (vmaCreateBuffer(allocator, &vertexBufferInfo, &vertexAllocInfo,
+                        &glbMesh.vertexBuffer, &glbMesh.vertexAllocation,
+                        nullptr) != VK_SUCCESS) {
+      std::cerr << "Failed to create vertex buffer!" << std::endl;
+      return false;
+    }
+
+    void *data;
+    vmaMapMemory(allocator, glbMesh.vertexAllocation, &data);
+    memcpy(data, vertices.data(), vertexSize);
+    vmaUnmapMemory(allocator, glbMesh.vertexAllocation);
+
+    // Create index buffer
+    VkDeviceSize indexSize = sizeof(uint32_t) * indices.size();
+    VkBufferCreateInfo indexBufferInfo{};
+    indexBufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    indexBufferInfo.size = indexSize;
+    indexBufferInfo.usage = VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+
+    VmaAllocationCreateInfo indexAllocInfo{};
+    indexAllocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+    if (vmaCreateBuffer(allocator, &indexBufferInfo, &indexAllocInfo,
+                        &glbMesh.indexBuffer, &glbMesh.indexAllocation,
+                        nullptr) != VK_SUCCESS) {
+      std::cerr << "Failed to create index buffer!" << std::endl;
+      vmaDestroyBuffer(allocator, glbMesh.vertexBuffer,
+                       glbMesh.vertexAllocation);
+      return false;
+    }
+
+    vmaMapMemory(allocator, glbMesh.indexAllocation, &data);
+    memcpy(data, indices.data(), indexSize);
+    vmaUnmapMemory(allocator, glbMesh.indexAllocation);
+
+    meshes.push_back(glbMesh);
+  }
+
+  return true;
 }
 
-bool GLBModel::loadTextures(const tinygltf::Model& model) {
-    for (const auto& gltfTexture : model.textures) {
-        GLBTexture texture;
-        const tinygltf::Image& image = model.images[gltfTexture.source];
-        
-        if (!createTextureImage(image, texture)) {
-            return false;
-        }
-        
-        textures.push_back(texture);
+bool GLBModel::loadTextures(const tinygltf::Model &model) {
+  for (const auto &gltfTexture : model.textures) {
+    if (gltfTexture.source < 0 || gltfTexture.source >= model.images.size()) {
+      std::cerr << "Invalid texture source index!" << std::endl;
+      continue;
     }
-    return true;
+
+    GLBTexture texture;
+    const tinygltf::Image &image = model.images[gltfTexture.source];
+
+    if (!createTextureImage(image, texture)) {
+      std::cerr << "Failed to create texture image!" << std::endl;
+      return false;
+    }
+
+    textures.push_back(texture);
+  }
+  return true;
 }
 
-bool GLBModel::createTextureImage(const tinygltf::Image& image, GLBTexture& texture) {
-    VkDeviceSize imageSize = image.width * image.height * 4;
-    
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAllocation;
-    
-    VkBufferCreateInfo bufferInfo{};
-    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    bufferInfo.size = imageSize;
-    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-    
-    vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, nullptr);
-    
-    void* data;
-    vmaMapMemory(allocator, stagingAllocation, &data);
+bool GLBModel::createTextureImage(const tinygltf::Image &image,
+                                  GLBTexture &texture) {
+  if (image.image.empty()) {
+    std::cerr << "Empty image data!" << std::endl;
+    return false;
+  }
+
+  VkDeviceSize imageSize = image.width * image.height * 4; // Assume RGBA
+
+  VkBuffer stagingBuffer;
+  VmaAllocation stagingAllocation;
+
+  VkBufferCreateInfo bufferInfo{};
+  bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+  bufferInfo.size = imageSize;
+  bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+  VmaAllocationCreateInfo allocInfo{};
+  allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
+
+  if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer,
+                      &stagingAllocation, nullptr) != VK_SUCCESS) {
+    return false;
+  }
+
+  void *data;
+  vmaMapMemory(allocator, stagingAllocation, &data);
+
+  // Convert to RGBA if needed
+  if (image.component == 3) {
+    std::vector<uint8_t> rgba(imageSize);
+    for (int i = 0; i < image.width * image.height; i++) {
+      rgba[i * 4 + 0] = image.image[i * 3 + 0];
+      rgba[i * 4 + 1] = image.image[i * 3 + 1];
+      rgba[i * 4 + 2] = image.image[i * 3 + 2];
+      rgba[i * 4 + 3] = 255;
+    }
+    memcpy(data, rgba.data(), imageSize);
+  } else {
     memcpy(data, image.image.data(), imageSize);
-    vmaUnmapMemory(allocator, stagingAllocation);
-    
-    VkImageCreateInfo imageInfo{};
-    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent.width = image.width;
-    imageInfo.extent.height = image.height;
-    imageInfo.extent.depth = 1;
-    imageInfo.mipLevels = 1;
-    imageInfo.arrayLayers = 1;
-    imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    
-    VmaAllocationCreateInfo imgAllocInfo{};
-    imgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-    
-    vmaCreateImage(allocator, &imageInfo, &imgAllocInfo, &texture.image, &texture.allocation, nullptr);
-    
-    VkCommandBuffer cmd = beginSingleTimeCommands();
-    transitionImageLayout(cmd, texture.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
-    
-    VkBufferImageCopy region{};
-    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    region.imageSubresource.layerCount = 1;
-    region.imageExtent = {(uint32_t)image.width, (uint32_t)image.height, 1};
-    vkCmdCopyBufferToImage(cmd, stagingBuffer, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-    
-    transitionImageLayout(cmd, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    endSingleTimeCommands(cmd);
-    
+  }
+
+  vmaUnmapMemory(allocator, stagingAllocation);
+
+  VkImageCreateInfo imageInfo{};
+  imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+  imageInfo.imageType = VK_IMAGE_TYPE_2D;
+  imageInfo.extent.width = image.width;
+  imageInfo.extent.height = image.height;
+  imageInfo.extent.depth = 1;
+  imageInfo.mipLevels = 1;
+  imageInfo.arrayLayers = 1;
+  imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+  imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+  imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+  imageInfo.usage =
+      VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+  imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+  imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+  VmaAllocationCreateInfo imgAllocInfo{};
+  imgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+  if (vmaCreateImage(allocator, &imageInfo, &imgAllocInfo, &texture.image,
+                     &texture.allocation, nullptr) != VK_SUCCESS) {
     vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
-    
-    // Create image view
-    VkImageViewCreateInfo viewInfo{};
-    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    viewInfo.image = texture.image;
-    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    viewInfo.subresourceRange.levelCount = 1;
-    viewInfo.subresourceRange.layerCount = 1;
-    vkCreateImageView(device, &viewInfo, nullptr, &texture.imageView);
-    
-    // Create sampler
-    VkSamplerCreateInfo samplerInfo{};
-    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-    samplerInfo.magFilter = VK_FILTER_LINEAR;
-    samplerInfo.minFilter = VK_FILTER_LINEAR;
-    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    vkCreateSampler(device, &samplerInfo, nullptr, &texture.sampler);
-    
-    return true;
+    return false;
+  }
+
+  VkCommandBuffer cmd = beginSingleTimeCommands();
+  transitionImageLayout(cmd, texture.image, VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+  VkBufferImageCopy region{};
+  region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  region.imageSubresource.layerCount = 1;
+  region.imageExtent = {(uint32_t)image.width, (uint32_t)image.height, 1};
+  vkCmdCopyBufferToImage(cmd, stagingBuffer, texture.image,
+                         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+
+  transitionImageLayout(cmd, texture.image,
+                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  endSingleTimeCommands(cmd);
+
+  vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+
+  // Create image view
+  VkImageViewCreateInfo viewInfo{};
+  viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+  viewInfo.image = texture.image;
+  viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+  viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+  viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  viewInfo.subresourceRange.levelCount = 1;
+  viewInfo.subresourceRange.layerCount = 1;
+
+  if (vkCreateImageView(device, &viewInfo, nullptr, &texture.imageView) !=
+      VK_SUCCESS) {
+    return false;
+  }
+
+  // Create sampler
+  VkSamplerCreateInfo samplerInfo{};
+  samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+  samplerInfo.magFilter = VK_FILTER_LINEAR;
+  samplerInfo.minFilter = VK_FILTER_LINEAR;
+  samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+  samplerInfo.anisotropyEnable = VK_FALSE;
+  samplerInfo.maxAnisotropy = 1.0f;
+  samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+  samplerInfo.unnormalizedCoordinates = VK_FALSE;
+  samplerInfo.compareEnable = VK_FALSE;
+  samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+
+  if (vkCreateSampler(device, &samplerInfo, nullptr, &texture.sampler) !=
+      VK_SUCCESS) {
+    return false;
+  }
+
+  return true;
 }
 
 void GLBModel::draw(VkCommandBuffer cmd) {
-    for (const auto& mesh : meshes) {
-        VkBuffer vertexBuffers[] = {mesh.vertexBuffer};
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-        vkCmdBindIndexBuffer(cmd, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-        vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
-    }
+  for (const auto &mesh : meshes) {
+    VkBuffer vertexBuffers[] = {mesh.vertexBuffer};
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+    vkCmdBindIndexBuffer(cmd, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
+  }
 }
 
 void GLBModel::cleanup() {
-    for (auto& mesh : meshes) {
-        vmaDestroyBuffer(allocator, mesh.vertexBuffer, mesh.vertexAllocation);
-        vmaDestroyBuffer(allocator, mesh.indexBuffer, mesh.indexAllocation);
+  for (auto &mesh : meshes) {
+    if (mesh.vertexBuffer != VK_NULL_HANDLE) {
+      vmaDestroyBuffer(allocator, mesh.vertexBuffer, mesh.vertexAllocation);
     }
-    for (auto& texture : textures) {
-        vkDestroySampler(device, texture.sampler, nullptr);
-        vkDestroyImageView(device, texture.imageView, nullptr);
-        vmaDestroyImage(allocator, texture.image, texture.allocation);
+    if (mesh.indexBuffer != VK_NULL_HANDLE) {
+      vmaDestroyBuffer(allocator, mesh.indexBuffer, mesh.indexAllocation);
     }
+  }
+  for (auto &texture : textures) {
+    if (texture.sampler != VK_NULL_HANDLE) {
+      vkDestroySampler(device, texture.sampler, nullptr);
+    }
+    if (texture.imageView != VK_NULL_HANDLE) {
+      vkDestroyImageView(device, texture.imageView, nullptr);
+    }
+    if (texture.image != VK_NULL_HANDLE) {
+      vmaDestroyImage(allocator, texture.image, texture.allocation);
+    }
+  }
+  meshes.clear();
+  textures.clear();
+  materials.clear();
 }
 
 VkCommandBuffer GLBModel::beginSingleTimeCommands() {
-    VkCommandBufferAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    allocInfo.commandPool = commandPool;
-    allocInfo.commandBufferCount = 1;
-    
-    VkCommandBuffer cmd;
-    vkAllocateCommandBuffers(device, &allocInfo, &cmd);
-    
-    VkCommandBufferBeginInfo beginInfo{};
-    beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-    vkBeginCommandBuffer(cmd, &beginInfo);
-    return cmd;
+  VkCommandBufferAllocateInfo allocInfo{};
+  allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+  allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+  allocInfo.commandPool = commandPool;
+  allocInfo.commandBufferCount = 1;
+
+  VkCommandBuffer cmd;
+  vkAllocateCommandBuffers(device, &allocInfo, &cmd);
+
+  VkCommandBufferBeginInfo beginInfo{};
+  beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+  beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+  vkBeginCommandBuffer(cmd, &beginInfo);
+  return cmd;
 }
 
 void GLBModel::endSingleTimeCommands(VkCommandBuffer cmd) {
-    vkEndCommandBuffer(cmd);
-    VkSubmitInfo submitInfo{};
-    submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &cmd;
-    vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-    vkQueueWaitIdle(graphicsQueue);
-    vkFreeCommandBuffers(device, commandPool, 1, &cmd);
+  vkEndCommandBuffer(cmd);
+  VkSubmitInfo submitInfo{};
+  submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+  submitInfo.commandBufferCount = 1;
+  submitInfo.pCommandBuffers = &cmd;
+  vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+  vkQueueWaitIdle(graphicsQueue);
+  vkFreeCommandBuffers(device, commandPool, 1, &cmd);
 }
 
-void GLBModel::transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout) {
-    VkImageMemoryBarrier barrier{};
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout = oldLayout;
-    barrier.newLayout = newLayout;
-    barrier.image = image;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.layerCount = 1;
-    
-    VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    
-    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    }
-    
-    vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+void GLBModel::transitionImageLayout(VkCommandBuffer cmd, VkImage image,
+                                     VkImageLayout oldLayout,
+                                     VkImageLayout newLayout) {
+  VkImageMemoryBarrier barrier{};
+  barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+  barrier.oldLayout = oldLayout;
+  barrier.newLayout = newLayout;
+  barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+  barrier.image = image;
+  barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+  barrier.subresourceRange.levelCount = 1;
+  barrier.subresourceRange.layerCount = 1;
+
+  VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+  VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+
+  if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED &&
+      newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+    dstStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+  } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL &&
+             newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    srcStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+  }
+
+  vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1,
+                       &barrier);
 }

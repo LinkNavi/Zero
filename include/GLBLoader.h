@@ -3,13 +3,10 @@
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <vector>
 #include <string>
 #include <unordered_map>
-
-#define TINYGLTF_IMPLEMENTATION
-#define STB_IMAGE_IMPLEMENTATION
-#define STB_IMAGE_WRITE_IMPLEMENTATION
 #include <tiny_gltf.h>
 
 struct GLBVertex {
@@ -88,8 +85,8 @@ public:
     void cleanup();
     
 private:
-    bool processNode(const tinygltf::Model& model, const tinygltf::Node& node);
-    bool processMesh(const tinygltf::Model& model, const tinygltf::Mesh& mesh);
+    bool processNode(const tinygltf::Model& model, const tinygltf::Node& node, glm::mat4 parentTransform);
+    bool processMesh(const tinygltf::Model& model, const tinygltf::Mesh& mesh, glm::mat4 transform);
     bool loadTextures(const tinygltf::Model& model);
     bool createTextureImage(const tinygltf::Image& image, GLBTexture& texture);
     void transitionImageLayout(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout);
