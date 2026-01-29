@@ -115,12 +115,9 @@ bool GLBModel::load(const std::string &filepath, VmaAllocator alloc,
   return true;
 }
 
-void GLBModel::generateMipmaps(VkImage image,
-                     VkFormat format,
-                     int32_t width,
-                     int32_t height,
-                     uint32_t mipLevels) {
-
+void GLBModel::generateMipmaps(VkImage image, VkFormat format,
+                               int32_t width, int32_t height,
+                               uint32_t mipLevels) {
     VkCommandBuffer cmd = beginSingleTimeCommands();
 
     VkImageMemoryBarrier barrier{};
@@ -133,87 +130,70 @@ void GLBModel::generateMipmaps(VkImage image,
     barrier.subresourceRange.layerCount = 1;
     barrier.subresourceRange.levelCount = 1;
 
-    int32_t mipWidth  = width;
+    int32_t mipWidth = width;
     int32_t mipHeight = height;
 
     for (uint32_t i = 1; i < mipLevels; i++) {
-        // Transition previous mip to TRANSFER_SRC
+        // Transition previous mip level (i-1) to TRANSFER_SRC
         barrier.subresourceRange.baseMipLevel = i - 1;
         barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         barrier.dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
 
-        vkCmdPipelineBarrier(
-            cmd,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0,
-            0, nullptr,
-            0, nullptr,
-            1, &barrier
-        );
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-        // Define blit from mip i-1 to mip i
+        // Blit from mip level i-1 to i
         VkImageBlit blit{};
         blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         blit.srcSubresource.mipLevel = i - 1;
+        blit.srcSubresource.baseArrayLayer = 0;
         blit.srcSubresource.layerCount = 1;
-        blit.srcOffsets[1] = { mipWidth, mipHeight, 1 };
+        blit.srcOffsets[0] = {0, 0, 0};
+        blit.srcOffsets[1] = {mipWidth, mipHeight, 1};
 
         blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         blit.dstSubresource.mipLevel = i;
+        blit.dstSubresource.baseArrayLayer = 0;
         blit.dstSubresource.layerCount = 1;
+        blit.dstOffsets[0] = {0, 0, 0};
         blit.dstOffsets[1] = {
-            mipWidth  > 1 ? mipWidth  / 2 : 1,
+            mipWidth > 1 ? mipWidth / 2 : 1,
             mipHeight > 1 ? mipHeight / 2 : 1,
             1
         };
 
-        vkCmdBlitImage(
-            cmd,
+        vkCmdBlitImage(cmd,
             image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-            1, &blit,
-            VK_FILTER_LINEAR
-        );
+            1, &blit, VK_FILTER_LINEAR);
 
-        // Transition previous mip to SHADER_READ
+        // Transition mip level i-1 to SHADER_READ_ONLY
         barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
         barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-        vkCmdPipelineBarrier(
-            cmd,
-            VK_PIPELINE_STAGE_TRANSFER_BIT,
-            VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0,
-            0, nullptr,
-            0, nullptr,
-            1, &barrier
-        );
+        vkCmdPipelineBarrier(cmd,
+            VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-        if (mipWidth > 1)  mipWidth  /= 2;
+        if (mipWidth > 1) mipWidth /= 2;
         if (mipHeight > 1) mipHeight /= 2;
     }
 
-    // Transition last mip to SHADER_READ
+    // Transition the last mip level to SHADER_READ_ONLY
     barrier.subresourceRange.baseMipLevel = mipLevels - 1;
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-    vkCmdPipelineBarrier(
-        cmd,
-        VK_PIPELINE_STAGE_TRANSFER_BIT,
-        VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        0,
-        0, nullptr,
-        0, nullptr,
-        1, &barrier
-    );
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
 
     endSingleTimeCommands(cmd);
 }
@@ -653,8 +633,7 @@ bool GLBModel::loadTextures(const tinygltf::Model &model) {
   return true;
 }
 
-bool GLBModel::createTextureImage(const tinygltf::Image &image,
-                                  GLBTexture &texture) {
+bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &texture) {
     if (image.image.empty()) {
         std::cerr << "Empty image data!" << std::endl;
         return false;
@@ -664,7 +643,7 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image,
     const uint32_t texHeight = image.height;
     const VkDeviceSize imageSize = texWidth * texHeight * 4;
 
-    // --- Prepare image data ---
+    // Prepare RGBA image data
     std::vector<uint8_t> rgba(imageSize);
     if (image.component == 3) {
         for (int i = 0; i < texWidth * texHeight; i++) {
@@ -688,10 +667,9 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image,
         return false;
     }
 
-    // --- Create staging buffer ---
+    // Create staging buffer
     VkBuffer stagingBuffer;
     VmaAllocation stagingAllocation;
-
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = imageSize;
@@ -700,7 +678,8 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image,
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
 
-    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAllocation, nullptr) != VK_SUCCESS) {
+    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, 
+                        &stagingAllocation, nullptr) != VK_SUCCESS) {
         return false;
     }
 
@@ -709,10 +688,10 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image,
     memcpy(data, rgba.data(), imageSize);
     vmaUnmapMemory(allocator, stagingAllocation);
 
-    // --- Determine mip levels ---
+    // Calculate mip levels
     uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
 
-    // --- Create GPU image ---
+    // Create GPU image with mipmap support
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -724,41 +703,67 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image,
     imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    // IMPORTANT: Need both TRANSFER_SRC for mipmap generation
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | 
+                      VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
+                      VK_IMAGE_USAGE_SAMPLED_BIT;
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VmaAllocationCreateInfo imgAllocInfo{};
     imgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    if (vmaCreateImage(allocator, &imageInfo, &imgAllocInfo, &texture.image, &texture.allocation, nullptr) != VK_SUCCESS) {
+    if (vmaCreateImage(allocator, &imageInfo, &imgAllocInfo, 
+                       &texture.image, &texture.allocation, nullptr) != VK_SUCCESS) {
         vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
         return false;
     }
 
-    // --- Copy buffer -> image ---
+    // Copy buffer to base mip level
     VkCommandBuffer cmd = beginSingleTimeCommands();
-    transitionImageLayout(cmd, texture.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    
+    // Transition to TRANSFER_DST for copying
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = texture.image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = mipLevels;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    
+    vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
 
+    // Copy staging buffer to base mip level (level 0)
     VkBufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.mipLevel = 0;
     region.imageSubresource.baseArrayLayer = 0;
     region.imageSubresource.layerCount = 1;
-    region.imageExtent = { texWidth, texHeight, 1 };
+    region.imageOffset = {0, 0, 0};
+    region.imageExtent = {texWidth, texHeight, 1};
 
-    vkCmdCopyBufferToImage(cmd, stagingBuffer, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    vkCmdCopyBufferToImage(cmd, stagingBuffer, texture.image, 
+                          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    // --- Generate mipmaps ---
-    generateMipmaps(texture.image, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, mipLevels);
-
-    // --- Final layout ---
-    transitionImageLayout(cmd, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     endSingleTimeCommands(cmd);
-
     vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
 
-    // --- Create image view ---
+    // NOW generate mipmaps (this will handle all the transitions)
+    generateMipmaps(texture.image, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, mipLevels);
+
+    // Create image view for ALL mip levels
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = texture.image;
@@ -766,7 +771,7 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image,
     viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = mipLevels;
+    viewInfo.subresourceRange.levelCount = mipLevels;  // IMPORTANT: All mip levels
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
@@ -774,7 +779,7 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image,
         return false;
     }
 
-    // --- Create sampler ---
+    // Create sampler with proper mipmap settings
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -782,24 +787,26 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image,
     samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.anisotropyEnable = VK_FALSE;
-    samplerInfo.maxAnisotropy = 1.0f;
+    samplerInfo.anisotropyEnable = VK_TRUE;  // Enable anisotropic filtering!
+    samplerInfo.maxAnisotropy = 16.0f;       // Maximum quality
     samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
     samplerInfo.unnormalizedCoordinates = VK_FALSE;
     samplerInfo.compareEnable = VK_FALSE;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;  // Linear interpolation between mips
     samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = static_cast<float>(mipLevels);
+    samplerInfo.maxLod = static_cast<float>(mipLevels);  // Use all mip levels
     samplerInfo.mipLodBias = 0.0f;
 
     if (vkCreateSampler(device, &samplerInfo, nullptr, &texture.sampler) != VK_SUCCESS) {
         return false;
     }
 
+    std::cout << "  Created texture: " << texWidth << "x" << texHeight 
+              << " with " << mipLevels << " mip levels" << std::endl;
+
     return true;
 }
-
-
 void GLBModel::draw(VkCommandBuffer cmd) {
   for (const auto &mesh : meshes) {
     VkBuffer vertexBuffers[] = {mesh.vertexBuffer};

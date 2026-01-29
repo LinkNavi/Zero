@@ -5,6 +5,7 @@
 #include "Camera.h"
 #include "CameraController.h"
 #include "Config.h"
+#include "ResourcePath.h"
 #include "PipelineGLB.h"
 #include "Engine.h"
 #include "GLBLoader.h"
@@ -236,11 +237,14 @@ int main() {
         return -1;
     }
     std::cout << "✓ GLB graphics pipeline created with texture support" << std::endl;
+ std::string modelPath = ResourcePath::models(
+        config.getString("model_name", "Duck.glb")
+    );
 
-    // Load GLB model with descriptor set layout from pipeline
+ std::cout << "  Model path: " << modelPath << std::endl;
+    
     GLBModel treeModel;
-    std::cout << "Loading GLB model with textures..." << std::endl;
-    if (!treeModel.load("models/tree.glb", renderer.getAllocator(),
+    if (!treeModel.load(modelPath, renderer.getAllocator(),
                         renderer.getDevice(), renderer.getCommandPool(),
                         renderer.getGraphicsQueue(),
                         glbPipeline.getDescriptorSetLayout())) {
@@ -249,6 +253,9 @@ int main() {
         renderer.cleanup();
         return -1;
     }
+    // Load GLB model with descriptor set layout from pipeline
+
+   
     std::cout << "✓ GLB model loaded with materials and textures" << std::endl;
 
     // Create camera
