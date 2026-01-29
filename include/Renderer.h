@@ -10,6 +10,8 @@
 #include <iostream>
 #include <cstring>
 
+constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+
 struct AllocatedBuffer {
     VkBuffer buffer;
     VmaAllocation allocation;
@@ -48,11 +50,18 @@ class VulkanRenderer {
     AllocatedImage depthImage;
     VkFormat depthFormat;
     
-    VkSemaphore imageAvailable, renderFinished;
-    VkFence inFlightFence;
+    // Double buffering for better performance
+    std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> imageAvailableSemaphores;
+    std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> renderFinishedSemaphores;
+    std::array<VkFence, MAX_FRAMES_IN_FLIGHT> inFlightFences;
+    std::vector<VkFence> imagesInFlight;
     
     uint32_t width, height;
     uint32_t currentFrame = 0;
+    uint32_t imageIndex = 0;
+    
+    // Command buffer reuse flag
+    bool commandBuffersRecorded = false;
 
 public:
     bool init(uint32_t w, uint32_t h, const char* title) {
@@ -88,7 +97,6 @@ public:
         }
         std::cout << "  ✓ GLFW window created" << std::endl;
         
-        // Get required extensions from GLFW
         uint32_t glfwExtensionCount = 0;
         const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
         
@@ -99,12 +107,6 @@ public:
             return false;
         }
         
-        std::cout << "  - Required Vulkan extensions (" << glfwExtensionCount << "):" << std::endl;
-        for (uint32_t i = 0; i < glfwExtensionCount; i++) {
-            std::cout << "    • " << glfwExtensions[i] << std::endl;
-        }
-        
-        // Instance
         std::cout << "  - Creating Vulkan instance..." << std::endl;
         vkb::InstanceBuilder builder;
         
@@ -130,7 +132,6 @@ public:
         instance = vkbInstance.instance;
         std::cout << "  ✓ Vulkan instance created" << std::endl;
         
-        // Surface
         std::cout << "  - Creating window surface..." << std::endl;
         VkResult surfaceResult = glfwCreateWindowSurface(instance, window, nullptr, &surface);
         if (surfaceResult != VK_SUCCESS) {
@@ -139,7 +140,6 @@ public:
         }
         std::cout << "  ✓ Window surface created" << std::endl;
         
-        // Device
         std::cout << "  - Selecting physical device..." << std::endl;
         vkb::PhysicalDeviceSelector selector{vkbInstance};
         auto physRet = selector
@@ -178,7 +178,6 @@ public:
         presentQueue = pqRet.value();
         std::cout << "  ✓ Queues acquired" << std::endl;
         
-        // VMA
         std::cout << "  - Initializing VMA allocator..." << std::endl;
         VmaAllocatorCreateInfo allocatorInfo = {};
         allocatorInfo.physicalDevice = physicalDevice;
@@ -190,16 +189,13 @@ public:
         }
         std::cout << "  ✓ VMA allocator created" << std::endl;
         
-        // Find depth format
         depthFormat = findDepthFormat();
         std::cout << "  ✓ Depth format selected" << std::endl;
         
-        // Swapchain
         std::cout << "  - Creating swapchain..." << std::endl;
         if (!createSwapchain()) return false;
         std::cout << "  ✓ Swapchain created" << std::endl;
         
-        // Depth buffer
         std::cout << "  - Creating depth buffer..." << std::endl;
         if (!createDepthResources()) return false;
         std::cout << "  ✓ Depth buffer created" << std::endl;
@@ -222,68 +218,93 @@ public:
         
         std::cout << "  - Creating sync objects..." << std::endl;
         if (!createSyncObjects()) return false;
-        std::cout << "  ✓ Sync objects created" << std::endl;
+        std::cout << "  ✓ Sync objects created (double buffered)" << std::endl;
         
         return true;
     }
 
     void beginFrame(VkCommandBuffer& cmd) {
-        vkWaitForFences(device, 1, &inFlightFence, VK_TRUE, UINT64_MAX);
-        vkResetFences(device, 1, &inFlightFence);
+        // Wait for previous frame to finish
+        vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
         
-        vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, imageAvailable, VK_NULL_HANDLE, &currentFrame);
+        // Acquire next image
+        VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, 
+            imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
         
-        cmd = commandBuffers[currentFrame];
-        vkResetCommandBuffer(cmd, 0);
+        if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
+            std::cerr << "Failed to acquire swapchain image!" << std::endl;
+            return;
+        }
         
-        VkCommandBufferBeginInfo beginInfo = {};
-        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkBeginCommandBuffer(cmd, &beginInfo);
+        // Check if a previous frame is using this image
+        if (imagesInFlight[imageIndex] != VK_NULL_HANDLE) {
+            vkWaitForFences(device, 1, &imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
+        }
+        imagesInFlight[imageIndex] = inFlightFences[currentFrame];
         
-        VkRenderPassBeginInfo rpInfo = {};
-        rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        rpInfo.renderPass = renderPass;
-        rpInfo.framebuffer = framebuffers[currentFrame];
-        rpInfo.renderArea.extent = {width, height};
+        cmd = commandBuffers[imageIndex];
         
-        // Clear values for color and depth
-        std::array<VkClearValue, 2> clearValues{};
-        clearValues[0].color = {{0.1f, 0.1f, 0.1f, 1.0f}};
-        clearValues[1].depthStencil = {1.0f, 0};
-        
-        rpInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-        rpInfo.pClearValues = clearValues.data();
-        
-        vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+        // Only reset and re-record if needed
+        if (!commandBuffersRecorded) {
+            vkResetCommandBuffer(cmd, 0);
+            
+            VkCommandBufferBeginInfo beginInfo = {};
+            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+            beginInfo.flags = 0; // Reusable command buffer
+            vkBeginCommandBuffer(cmd, &beginInfo);
+            
+            VkRenderPassBeginInfo rpInfo = {};
+            rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            rpInfo.renderPass = renderPass;
+            rpInfo.framebuffer = framebuffers[imageIndex];
+            rpInfo.renderArea.extent = {width, height};
+            
+            std::array<VkClearValue, 2> clearValues{};
+            clearValues[0].color = {{0.1f, 0.1f, 0.1f, 1.0f}};
+            clearValues[1].depthStencil = {1.0f, 0};
+            
+            rpInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+            rpInfo.pClearValues = clearValues.data();
+            
+            vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+        }
     }
 
     void endFrame(VkCommandBuffer cmd) {
-        vkCmdEndRenderPass(cmd);
-        vkEndCommandBuffer(cmd);
+        if (!commandBuffersRecorded) {
+            vkCmdEndRenderPass(cmd);
+            vkEndCommandBuffer(cmd);
+        }
+        
+        // Reset fence only before submitting
+        vkResetFences(device, 1, &inFlightFences[currentFrame]);
         
         VkSubmitInfo submitInfo = {};
         submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         VkPipelineStageFlags waitStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
         submitInfo.waitSemaphoreCount = 1;
-        submitInfo.pWaitSemaphores = &imageAvailable;
+        submitInfo.pWaitSemaphores = &imageAvailableSemaphores[currentFrame];
         submitInfo.pWaitDstStageMask = &waitStage;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &cmd;
         submitInfo.signalSemaphoreCount = 1;
-        submitInfo.pSignalSemaphores = &renderFinished;
+        submitInfo.pSignalSemaphores = &renderFinishedSemaphores[currentFrame];
         
-        vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFence);
+        if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
+            std::cerr << "Failed to submit draw command buffer!" << std::endl;
+        }
         
         VkPresentInfoKHR presentInfo = {};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         presentInfo.waitSemaphoreCount = 1;
-        presentInfo.pWaitSemaphores = &renderFinished;
+        presentInfo.pWaitSemaphores = &renderFinishedSemaphores[currentFrame];
         presentInfo.swapchainCount = 1;
         presentInfo.pSwapchains = &swapchain;
-        presentInfo.pImageIndices = &currentFrame;
+        presentInfo.pImageIndices = &imageIndex;
         
         vkQueuePresentKHR(presentQueue, &presentInfo);
+        
+        currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     bool shouldClose() { return glfwWindowShouldClose(window); }
@@ -295,20 +316,24 @@ public:
     VkRenderPass getRenderPass() { return renderPass; }
     VkCommandPool getCommandPool() { return commandPool; }
     VkQueue getGraphicsQueue() { return graphicsQueue; }
+    VkPhysicalDevice getPhysicalDevice() { return physicalDevice; }
+    
+    void setCommandBuffersRecorded(bool recorded) { commandBuffersRecorded = recorded; }
 
     void cleanup() {
         vkDeviceWaitIdle(device);
         
-        vkDestroySemaphore(device, imageAvailable, nullptr);
-        vkDestroySemaphore(device, renderFinished, nullptr);
-        vkDestroyFence(device, inFlightFence, nullptr);
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            vkDestroySemaphore(device, imageAvailableSemaphores[i], nullptr);
+            vkDestroySemaphore(device, renderFinishedSemaphores[i], nullptr);
+            vkDestroyFence(device, inFlightFences[i], nullptr);
+        }
         
         vkDestroyCommandPool(device, commandPool, nullptr);
         
         for (auto fb : framebuffers)
             vkDestroyFramebuffer(device, fb, nullptr);
         
-        // Clean up depth resources
         vkDestroyImageView(device, depthImage.view, nullptr);
         vmaDestroyImage(allocator, depthImage.image, depthImage.allocation);
         
@@ -344,7 +369,7 @@ private:
             }
         }
         
-        return VK_FORMAT_D32_SFLOAT; // Fallback
+        return VK_FORMAT_D32_SFLOAT;
     }
     
     bool createDepthResources() {
@@ -371,7 +396,6 @@ private:
             return false;
         }
         
-        // Create image view
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = depthImage.image;
@@ -414,7 +438,6 @@ private:
     }
 
     bool createRenderPass() {
-        // Color attachment
         VkAttachmentDescription colorAttachment = {};
         colorAttachment.format = VK_FORMAT_B8G8R8A8_SRGB;
         colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -429,7 +452,6 @@ private:
         colorRef.attachment = 0;
         colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         
-        // Depth attachment
         VkAttachmentDescription depthAttachment{};
         depthAttachment.format = depthFormat;
         depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -444,14 +466,12 @@ private:
         depthRef.attachment = 1;
         depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
         
-        // Subpass
         VkSubpassDescription subpass = {};
         subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpass.colorAttachmentCount = 1;
         subpass.pColorAttachments = &colorRef;
         subpass.pDepthStencilAttachment = &depthRef;
         
-        // Subpass dependency
         VkSubpassDependency dependency{};
         dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
         dependency.dstSubpass = 0;
@@ -519,16 +539,26 @@ private:
         return vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) == VK_SUCCESS;
     }
 
-    bool createSyncObjects() {
-        VkSemaphoreCreateInfo semInfo = {};
-        semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-        
-        VkFenceCreateInfo fenceInfo = {};
-        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-        
-        return vkCreateSemaphore(device, &semInfo, nullptr, &imageAvailable) == VK_SUCCESS &&
-               vkCreateSemaphore(device, &semInfo, nullptr, &renderFinished) == VK_SUCCESS &&
-               vkCreateFence(device, &fenceInfo, nullptr, &inFlightFence) == VK_SUCCESS;
+  
+bool createSyncObjects() {
+    imagesInFlight.resize(swapchainImages.size(), VK_NULL_HANDLE);
+
+    VkSemaphoreCreateInfo semInfo{};
+    semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        if (vkCreateSemaphore(device, &semInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+            vkCreateSemaphore(device, &semInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
+            vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
+            return false;
+        }
     }
+
+    return true;
+}
+
 };

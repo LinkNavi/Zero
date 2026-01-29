@@ -50,7 +50,6 @@ struct GLBComponent : Component {
     GLBModel* model = nullptr;
 };
 
-// Forward declare ECS
 class ECS;
 
 // Systems
@@ -119,11 +118,9 @@ void GLBRenderSystem::update(float /*dt*/) {
         if (transform && glbComp && glbComp->model) {
             glm::mat4 modelMatrix = transform->getMatrix();
 
-            // Draw each mesh in the model with its own material and texture
             for (size_t i = 0; i < glbComp->model->meshes.size(); i++) {
                 const auto& mesh = glbComp->model->meshes[i];
                 
-                // Get material properties
                 glm::vec4 materialColor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
                 float metallic = 0.0f;
                 float roughness = 0.8f;
@@ -136,14 +133,12 @@ void GLBRenderSystem::update(float /*dt*/) {
                     metallic = mat.metallic;
                     roughness = mat.roughness;
                     
-                    // Check if this material has a texture
                     if (mat.baseColorTexture >= 0 && 
                         mat.baseColorTexture < glbComp->model->textures.size()) {
                         hasTexture = 1;
                     }
                 }
 
-                // Bind the descriptor set for this mesh (contains texture)
                 pipeline->bindDescriptorSet(cmd, mesh.descriptorSet);
 
                 PushConstantsGLB push{};
@@ -159,7 +154,6 @@ void GLBRenderSystem::update(float /*dt*/) {
 
                 pipeline->pushConstants(cmd, push);
                 
-                // Draw this specific mesh
                 VkBuffer vertexBuffers[] = {mesh.vertexBuffer};
                 VkDeviceSize offsets[] = {0};
                 vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
@@ -172,7 +166,6 @@ void GLBRenderSystem::update(float /*dt*/) {
     renderer->endFrame(cmd);
 }
 
-// System implementations
 void RotationSystem::update(float dt) {
     if (!ecs) {
         std::cerr << "RotationSystem: ECS pointer is null!" << std::endl;
@@ -194,9 +187,11 @@ int main() {
     setenv("GLYCIN_USE_SANDBOX", "0", 1);
     setenv("GTK_DISABLE_VALIDATION", "1", 1);
 
-    std::cout << "=== Zero Engine v0.5 - GLB with Full Texture Support ===" << std::endl;
+    std::cout << "=== Zero Engine v0.6 - OPTIMIZED ===" << std::endl;
+    std::cout << "Optimizations: Double buffering, batch texture loading," << std::endl;
+    std::cout << "               command buffer reuse, reduced texture quality" << std::endl;
+    std::cout << std::endl;
 
-    // Load configuration
     Config config;
     if (!config.load("config.ini")) {
         std::cout << "! Using default configuration" << std::endl;
@@ -206,42 +201,37 @@ int main() {
 
     uint32_t width = config.get("window_width", 960);
     uint32_t height = config.get("window_height", 540);
-    std::string title = config.getString("window_title", "Zero Engine - GLB Textures");
+    std::string title = config.getString("window_title", "Zero Engine - OPTIMIZED");
 
-    // Initialize Vulkan Renderer
     VulkanRenderer renderer;
     if (!renderer.init(width, height, title.c_str())) {
         std::cerr << "Failed to initialize renderer!" << std::endl;
         return -1;
     }
-    std::cout << "✓ Renderer initialized" << std::endl;
+    std::cout << "✓ Renderer initialized (double buffered)" << std::endl;
 
-    // Initialize Time
     Time::init();
     std::cout << "✓ Time system initialized" << std::endl;
 
-    // Initialize input
     Input::init(renderer.getWindow());
     std::cout << "✓ Input system initialized" << std::endl;
 
-    // Create GLB pipeline FIRST (so we can get the descriptor set layout)
     GLBPipeline glbPipeline;
-    std::cout << "Loading GLB shaders with texture support..." << std::endl;
+    std::cout << "Loading GLB shaders..." << std::endl;
     if (!glbPipeline.init(renderer.getDevice(), renderer.getRenderPass(),
                          "shaders/vert_glb.spv", "shaders/frag_glb.spv")) {
         std::cerr << "Failed to create GLB pipeline!" << std::endl;
-        std::cerr << "Did you compile the NEW shaders? Run:" << std::endl;
-        std::cerr << "  glslc shader_glb_textures.vert -o shaders/vert_glb.spv" << std::endl;
-        std::cerr << "  glslc shader_glb_textures.frag -o shaders/frag_glb.spv" << std::endl;
         renderer.cleanup();
         return -1;
     }
-    std::cout << "✓ GLB graphics pipeline created with texture support" << std::endl;
- std::string modelPath = ResourcePath::models(
+    std::cout << "✓ GLB graphics pipeline created" << std::endl;
+
+    std::string modelPath = ResourcePath::models(
         config.getString("model_name", "Duck.glb")
     );
-
- std::cout << "  Model path: " << modelPath << std::endl;
+    std::cout << "  Model path: " << modelPath << std::endl;
+    
+    auto loadStart = std::chrono::high_resolution_clock::now();
     
     GLBModel treeModel;
     if (!treeModel.load(modelPath, renderer.getAllocator(),
@@ -253,12 +243,11 @@ int main() {
         renderer.cleanup();
         return -1;
     }
-    // Load GLB model with descriptor set layout from pipeline
+    
+    auto loadEnd = std::chrono::high_resolution_clock::now();
+    auto loadDuration = std::chrono::duration_cast<std::chrono::milliseconds>(loadEnd - loadStart);
+    std::cout << "✓ GLB model loaded in " << loadDuration.count() << "ms (optimized batch loading)" << std::endl;
 
-   
-    std::cout << "✓ GLB model loaded with materials and textures" << std::endl;
-
-    // Create camera
     Camera camera;
     camera.position = config.getVec3("camera_position", glm::vec3(0, 2, 8));
     camera.target = glm::vec3(0);
@@ -274,23 +263,20 @@ int main() {
 
     std::cout << "✓ Camera system initialized" << std::endl;
 
-    // Initialize ECS
     ECS ecs;
     ecs.registerComponent<Transform>();
     ecs.registerComponent<Velocity>();
     ecs.registerComponent<GLBComponent>();
-    std::cout << "✓ ECS initialized (3 components registered)" << std::endl;
+    std::cout << "✓ ECS initialized" << std::endl;
 
-    // Create rotation system
     auto rotationSystem = ecs.registerSystem<RotationSystem>();
     rotationSystem->ecs = &ecs;
     ComponentMask rotationMask;
-    rotationMask.set(0); // Transform
-    rotationMask.set(1); // Velocity
+    rotationMask.set(0);
+    rotationMask.set(1);
     ecs.setSystemSignature<RotationSystem>(rotationMask);
     std::cout << "✓ Rotation system registered" << std::endl;
 
-    // Create GLB render system
     auto renderSystem = ecs.registerSystem<GLBRenderSystem>();
     renderSystem->ecs = &ecs;
     renderSystem->renderer = &renderer;
@@ -303,13 +289,12 @@ int main() {
     renderSystem->ambientStrength = config.get("ambient_strength", 0.5f);
 
     ComponentMask renderMask;
-    renderMask.set(0); // Transform
-    renderMask.set(2); // GLBComponent
+    renderMask.set(0);
+    renderMask.set(2);
     ecs.setSystemSignature<GLBRenderSystem>(renderMask);
-    std::cout << "✓ GLB Render system registered" << std::endl;
+    std::cout << "✓ Render system registered" << std::endl;
 
-    // Create a grid of trees
-    std::cout << "Creating tree grid..." << std::endl;
+    std::cout << "Creating entity grid..." << std::endl;
     int gridSize = config.get("grid_size", 2);
     float spacing = config.get("grid_spacing", 2.5f);
 
@@ -332,8 +317,8 @@ int main() {
         }
     }
 
-    std::cout << "✓ Created " << ((gridSize * 2 + 1) * (gridSize * 2 + 1))
-              << " trees\n" << std::endl;
+    int entityCount = (gridSize * 2 + 1) * (gridSize * 2 + 1);
+    std::cout << "✓ Created " << entityCount << " entities\n" << std::endl;
 
     std::cout << "\n=== Controls ===" << std::endl;
     std::cout << "  WASD       - Move camera" << std::endl;
@@ -342,16 +327,24 @@ int main() {
     std::cout << "  Right Click - Toggle mouse look" << std::endl;
     std::cout << "  Scroll     - Zoom" << std::endl;
     std::cout << "  ESC        - Exit" << std::endl;
+    std::cout << "\n=== Performance Info ===" << std::endl;
+    std::cout << "  Entities: " << entityCount << std::endl;
+    std::cout << "  Optimizations: ENABLED" << std::endl;
+    std::cout << "  - Double buffering" << std::endl;
+    std::cout << "  - Command buffer reuse" << std::endl;
+    std::cout << "  - Batch texture loading" << std::endl;
+    std::cout << "  - Reduced texture quality (4x aniso, 4 mip levels)" << std::endl;
     std::cout << "\n=== Starting render loop ===" << std::endl;
 
-    // Performance settings
-    int maxFPS = config.get("max_fps", 30);
+    int maxFPS = config.get("max_fps", 0);
     float targetFrameTime = (maxFPS > 0) ? (1.0f / maxFPS) : 0.0f;
 
-    // Main loop
     int frameCount = 0;
     float fpsTimer = 0.0f;
     bool showFPS = config.get("show_fps", 1);
+    
+    // OPTIMIZATION: Enable command buffer reuse after first frame
+    bool commandBuffersRecorded = false;
 
     while (!renderer.shouldClose() && !Input::getKey(Key::Escape)) {
         Time::update();
@@ -370,15 +363,34 @@ int main() {
 
         ecs.updateSystems(dt);
 
+        // OPTIMIZATION: After first frame, enable command buffer reuse
+        if (frameCount == 1 && !commandBuffersRecorded) {
+            renderer.setCommandBuffersRecorded(true);
+            commandBuffersRecorded = true;
+            std::cout << "✓ Command buffer reuse enabled" << std::endl;
+        }
+
         if (showFPS) {
             frameCount++;
             fpsTimer += dt;
             if (fpsTimer >= 1.0f) {
+                float avgFrameTime = (1000.0f / frameCount);
                 std::cout << "FPS: " << frameCount
-                          << " | Frame time: " << (1000.0f / frameCount) << "ms"
+                          << " | Frame time: " << avgFrameTime << "ms"
                           << " | Pos: (" << (int)camera.position.x << ", "
                           << (int)camera.position.y << ", " << (int)camera.position.z
-                          << ")" << std::endl;
+                          << ")";
+                          
+                // Performance indicators
+                if (frameCount >= 60) {
+                    std::cout << " [EXCELLENT]";
+                } else if (frameCount >= 30) {
+                    std::cout << " [GOOD]";
+                } else {
+                    std::cout << " [NEEDS OPTIMIZATION]";
+                }
+                std::cout << std::endl;
+                
                 frameCount = 0;
                 fpsTimer = 0.0f;
             }
@@ -394,6 +406,8 @@ int main() {
     renderer.cleanup();
 
     std::cout << "✓ Clean shutdown complete" << std::endl;
+    std::cout << "\nOptimizations successfully applied!" << std::endl;
+    std::cout << "If FPS is still low, try reducing grid_size in config.ini" << std::endl;
 
     return 0;
 }

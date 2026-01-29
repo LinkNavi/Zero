@@ -1,4 +1,4 @@
-// include/GLBLoader.h
+// include/GLBLoader.h - Optimized version
 #pragma once
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -52,8 +52,7 @@ struct GLBMesh {
   VmaAllocation indexAllocation;
   uint32_t indexCount = 0;
   int materialIndex = -1;
-  VkDescriptorSet descriptorSet =
-      VK_NULL_HANDLE; // Descriptor set for this mesh's texture
+  VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
 };
 
 struct GLBMaterial {
@@ -79,10 +78,8 @@ class GLBModel {
   VkQueue graphicsQueue = VK_NULL_HANDLE;
 
   VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
-  VkDescriptorSet defaultDescriptorSet =
-      VK_NULL_HANDLE; // For meshes without textures
+  VkDescriptorSet defaultDescriptorSet = VK_NULL_HANDLE;
 
-  // Default white texture for meshes without textures
   GLBTexture defaultTexture;
 
 public:
@@ -97,8 +94,9 @@ public:
   void cleanup();
 
 private:
-  void generateMipmaps(VkImage image, VkFormat format, int32_t width,
-                       int32_t height, uint32_t mipLevels);
+  // OPTIMIZED: Pass command buffer to avoid creating new ones
+  void generateMipmaps(VkCommandBuffer cmd, VkImage image, VkFormat format, 
+                       int32_t width, int32_t height, uint32_t mipLevels);
   bool createDefaultTexture();
   bool createDescriptorPool(VkDescriptorSetLayout descriptorSetLayout);
   bool createDescriptorSets(VkDescriptorSetLayout descriptorSetLayout);
@@ -107,7 +105,9 @@ private:
   bool processMesh(const tinygltf::Model &model, const tinygltf::Mesh &mesh,
                    glm::mat4 transform);
   bool loadTextures(const tinygltf::Model &model);
-  bool createTextureImage(const tinygltf::Image &image, GLBTexture &texture);
+  // OPTIMIZED: Pass command buffer for batched texture upload
+  bool createTextureImage(const tinygltf::Image &image, GLBTexture &texture, 
+                          VkCommandBuffer cmd);
   void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
                              VkImageLayout oldLayout, VkImageLayout newLayout);
   VkCommandBuffer beginSingleTimeCommands();

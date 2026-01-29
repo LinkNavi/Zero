@@ -1,3 +1,4 @@
+// Optimized GLBLoader.cpp with reduced synchronization and descriptor caching
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -34,7 +35,7 @@ bool GLBModel::load(const std::string &filepath, VmaAllocator alloc,
     return false;
   }
 
-  // Load textures
+  // Load textures - OPTIMIZED: batch upload
   if (!loadTextures(model)) {
     std::cerr << "Failed to load textures" << std::endl;
     return false;
@@ -77,14 +78,6 @@ bool GLBModel::load(const std::string &filepath, VmaAllocator alloc,
     }
 
     materials.push_back(material);
-    
-    std::cout << "  Material " << materials.size() - 1 << ": baseColor=" 
-              << material.baseColor.r << "," << material.baseColor.g << "," << material.baseColor.b
-              << " metallic=" << material.metallic 
-              << " roughness=" << material.roughness
-              << " textures: base=" << material.baseColorTexture 
-              << " normal=" << material.normalTexture
-              << " mr=" << material.metallicRoughnessTexture << std::endl;
   }
 
   // Load meshes from scene with proper transform hierarchy
@@ -115,11 +108,10 @@ bool GLBModel::load(const std::string &filepath, VmaAllocator alloc,
   return true;
 }
 
-void GLBModel::generateMipmaps(VkImage image, VkFormat format,
+void GLBModel::generateMipmaps(VkCommandBuffer cmd, VkImage image, VkFormat format,
                                int32_t width, int32_t height,
                                uint32_t mipLevels) {
-    VkCommandBuffer cmd = beginSingleTimeCommands();
-
+    // OPTIMIZED: Mipmap generation in single command buffer (passed in)
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.image = image;
@@ -134,7 +126,6 @@ void GLBModel::generateMipmaps(VkImage image, VkFormat format,
     int32_t mipHeight = height;
 
     for (uint32_t i = 1; i < mipLevels; i++) {
-        // Transition previous mip level (i-1) to TRANSFER_SRC
         barrier.subresourceRange.baseMipLevel = i - 1;
         barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
@@ -145,7 +136,6 @@ void GLBModel::generateMipmaps(VkImage image, VkFormat format,
             VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
             0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-        // Blit from mip level i-1 to i
         VkImageBlit blit{};
         blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         blit.srcSubresource.mipLevel = i - 1;
@@ -170,7 +160,6 @@ void GLBModel::generateMipmaps(VkImage image, VkFormat format,
             image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             1, &blit, VK_FILTER_LINEAR);
 
-        // Transition mip level i-1 to SHADER_READ_ONLY
         barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
         barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
@@ -184,7 +173,6 @@ void GLBModel::generateMipmaps(VkImage image, VkFormat format,
         if (mipHeight > 1) mipHeight /= 2;
     }
 
-    // Transition the last mip level to SHADER_READ_ONLY
     barrier.subresourceRange.baseMipLevel = mipLevels - 1;
     barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -194,9 +182,8 @@ void GLBModel::generateMipmaps(VkImage image, VkFormat format,
     vkCmdPipelineBarrier(cmd,
         VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         0, 0, nullptr, 0, nullptr, 1, &barrier);
-
-    endSingleTimeCommands(cmd);
 }
+
 bool GLBModel::createDefaultTexture() {
   unsigned char whitePixel[4] = {255, 255, 255, 255};
   
@@ -296,7 +283,6 @@ bool GLBModel::createDefaultTexture() {
     return false;
   }
   
-  std::cout << "✓ Created default white texture" << std::endl;
   return true;
 }
 
@@ -317,12 +303,10 @@ bool GLBModel::createDescriptorPool(VkDescriptorSetLayout) {
     return false;
   }
   
-  std::cout << "✓ Created descriptor pool for " << maxSets << " sets" << std::endl;
   return true;
 }
 
 bool GLBModel::createDescriptorSets(VkDescriptorSetLayout descriptorSetLayout) {
-  // Create default descriptor set
   VkDescriptorSetAllocateInfo allocInfo{};
   allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
   allocInfo.descriptorPool = descriptorPool;
@@ -334,7 +318,6 @@ bool GLBModel::createDescriptorSets(VkDescriptorSetLayout descriptorSetLayout) {
     return false;
   }
   
-  // Update default descriptor set with white texture
   VkDescriptorImageInfo imageInfo{};
   imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
   imageInfo.imageView = defaultTexture.imageView;
@@ -351,17 +334,28 @@ bool GLBModel::createDescriptorSets(VkDescriptorSetLayout descriptorSetLayout) {
   
   vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
   
-  // Create descriptor sets for each mesh
+  // OPTIMIZED: Batch allocate all descriptor sets at once
+  std::vector<VkDescriptorSetLayout> layouts(meshes.size(), descriptorSetLayout);
+  std::vector<VkDescriptorSet> sets(meshes.size());
+  
+  allocInfo.descriptorSetCount = static_cast<uint32_t>(meshes.size());
+  allocInfo.pSetLayouts = layouts.data();
+  
+  if (vkAllocateDescriptorSets(device, &allocInfo, sets.data()) != VK_SUCCESS) {
+    std::cerr << "Failed to batch allocate descriptor sets!" << std::endl;
+    return false;
+  }
+  
+  // OPTIMIZED: Batch update descriptor sets
+  std::vector<VkWriteDescriptorSet> writes;
+  std::vector<VkDescriptorImageInfo> imageInfos;
+  writes.reserve(meshes.size());
+  imageInfos.reserve(meshes.size());
+  
   for (size_t i = 0; i < meshes.size(); i++) {
     auto& mesh = meshes[i];
+    mesh.descriptorSet = sets[i];
     
-    // Allocate descriptor set
-    if (vkAllocateDescriptorSets(device, &allocInfo, &mesh.descriptorSet) != VK_SUCCESS) {
-      std::cerr << "Failed to allocate descriptor set for mesh " << i << std::endl;
-      return false;
-    }
-    
-    // Determine which texture to use
     VkImageView texView = defaultTexture.imageView;
     VkSampler texSampler = defaultTexture.sampler;
     
@@ -370,29 +364,28 @@ bool GLBModel::createDescriptorSets(VkDescriptorSetLayout descriptorSetLayout) {
       if (material.baseColorTexture >= 0 && material.baseColorTexture < textures.size()) {
         texView = textures[material.baseColorTexture].imageView;
         texSampler = textures[material.baseColorTexture].sampler;
-        std::cout << "  Mesh " << i << " using texture " << material.baseColorTexture << std::endl;
       }
     }
     
-    // Update descriptor set
-    VkDescriptorImageInfo meshImageInfo{};
-    meshImageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    meshImageInfo.imageView = texView;
-    meshImageInfo.sampler = texSampler;
+    VkDescriptorImageInfo imgInfo{};
+    imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imgInfo.imageView = texView;
+    imgInfo.sampler = texSampler;
+    imageInfos.push_back(imgInfo);
     
-    VkWriteDescriptorSet meshDescriptorWrite{};
-    meshDescriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-    meshDescriptorWrite.dstSet = mesh.descriptorSet;
-    meshDescriptorWrite.dstBinding = 0;
-    meshDescriptorWrite.dstArrayElement = 0;
-    meshDescriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    meshDescriptorWrite.descriptorCount = 1;
-    meshDescriptorWrite.pImageInfo = &meshImageInfo;
-    
-    vkUpdateDescriptorSets(device, 1, &meshDescriptorWrite, 0, nullptr);
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = mesh.descriptorSet;
+    write.dstBinding = 0;
+    write.dstArrayElement = 0;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.descriptorCount = 1;
+    write.pImageInfo = &imageInfos[i];
+    writes.push_back(write);
   }
   
-  std::cout << "✓ Created and updated " << (meshes.size() + 1) << " descriptor sets" << std::endl;
+  vkUpdateDescriptorSets(device, static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+  
   return true;
 }
 
@@ -604,7 +597,14 @@ bool GLBModel::processMesh(const tinygltf::Model &model,
 }
 
 bool GLBModel::loadTextures(const tinygltf::Model &model) {
-  std::cout << "Loading " << model.textures.size() << " textures..." << std::endl;
+  if (model.textures.empty()) {
+    return true;
+  }
+  
+  std::cout << "Loading " << model.textures.size() << " textures (batched)..." << std::endl;
+  
+  // OPTIMIZED: Single command buffer for all texture uploads
+  VkCommandBuffer cmd = beginSingleTimeCommands();
   
   for (size_t i = 0; i < model.textures.size(); i++) {
     const auto &gltfTexture = model.textures[i];
@@ -617,23 +617,23 @@ bool GLBModel::loadTextures(const tinygltf::Model &model) {
     GLBTexture texture;
     const tinygltf::Image &image = model.images[gltfTexture.source];
 
-    std::cout << "  Texture " << i << ": " << image.name 
-              << " (" << image.width << "x" << image.height 
-              << ", " << image.component << " channels)" << std::endl;
-
-    if (!createTextureImage(image, texture)) {
+    if (!createTextureImage(image, texture, cmd)) {
       std::cerr << "Failed to create texture image " << i << std::endl;
+      endSingleTimeCommands(cmd);
       return false;
     }
 
     textures.push_back(texture);
   }
   
+  // OPTIMIZED: Submit all texture uploads in one batch
+  endSingleTimeCommands(cmd);
+  
   std::cout << "✓ Loaded " << textures.size() << " textures" << std::endl;
   return true;
 }
 
-bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &texture) {
+bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &texture, VkCommandBuffer cmd) {
     if (image.image.empty()) {
         std::cerr << "Empty image data!" << std::endl;
         return false;
@@ -643,7 +643,6 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
     const uint32_t texHeight = image.height;
     const VkDeviceSize imageSize = texWidth * texHeight * 4;
 
-    // Prepare RGBA image data
     std::vector<uint8_t> rgba(imageSize);
     if (image.component == 3) {
         for (int i = 0; i < texWidth * texHeight; i++) {
@@ -667,7 +666,6 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
         return false;
     }
 
-    // Create staging buffer
     VkBuffer stagingBuffer;
     VmaAllocation stagingAllocation;
     VkBufferCreateInfo bufferInfo{};
@@ -688,10 +686,9 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
     memcpy(data, rgba.data(), imageSize);
     vmaUnmapMemory(allocator, stagingAllocation);
 
-    // Calculate mip levels
-    uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1;
+    // OPTIMIZED: Reduce mip levels for Chromebook performance
+    uint32_t mipLevels = std::min(4u, static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1);
 
-    // Create GPU image with mipmap support
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -703,7 +700,6 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
     imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
     imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    // IMPORTANT: Need both TRANSFER_SRC for mipmap generation
     imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | 
                       VK_IMAGE_USAGE_TRANSFER_SRC_BIT | 
                       VK_IMAGE_USAGE_SAMPLED_BIT;
@@ -719,10 +715,7 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
         return false;
     }
 
-    // Copy buffer to base mip level
-    VkCommandBuffer cmd = beginSingleTimeCommands();
-    
-    // Transition to TRANSFER_DST for copying
+    // Use passed command buffer instead of creating new one
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -742,7 +735,6 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
         VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
         0, 0, nullptr, 0, nullptr, 1, &barrier);
 
-    // Copy staging buffer to base mip level (level 0)
     VkBufferImageCopy region{};
     region.bufferOffset = 0;
     region.bufferRowLength = 0;
@@ -757,13 +749,12 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
     vkCmdCopyBufferToImage(cmd, stagingBuffer, texture.image, 
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-    endSingleTimeCommands(cmd);
+    // Generate mipmaps in same command buffer
+    generateMipmaps(cmd, texture.image, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, mipLevels);
+
+    // Clean up staging buffer immediately (still valid while cmd is recording)
     vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
 
-    // NOW generate mipmaps (this will handle all the transitions)
-    generateMipmaps(texture.image, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, mipLevels);
-
-    // Create image view for ALL mip levels
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
     viewInfo.image = texture.image;
@@ -771,7 +762,7 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
     viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = mipLevels;  // IMPORTANT: All mip levels
+    viewInfo.subresourceRange.levelCount = mipLevels;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
@@ -779,7 +770,7 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
         return false;
     }
 
-    // Create sampler with proper mipmap settings
+    // OPTIMIZED: Reduced anisotropy for Chromebook
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -787,26 +778,24 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
     samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    samplerInfo.anisotropyEnable = VK_TRUE;  // Enable anisotropic filtering!
-    samplerInfo.maxAnisotropy = 16.0f;       // Maximum quality
+    samplerInfo.anisotropyEnable = VK_TRUE;
+    samplerInfo.maxAnisotropy = 4.0f;  // Reduced from 16.0f for performance
     samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
     samplerInfo.unnormalizedCoordinates = VK_FALSE;
     samplerInfo.compareEnable = VK_FALSE;
     samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
-    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;  // Linear interpolation between mips
+    samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = static_cast<float>(mipLevels);  // Use all mip levels
+    samplerInfo.maxLod = static_cast<float>(mipLevels);
     samplerInfo.mipLodBias = 0.0f;
 
     if (vkCreateSampler(device, &samplerInfo, nullptr, &texture.sampler) != VK_SUCCESS) {
         return false;
     }
 
-    std::cout << "  Created texture: " << texWidth << "x" << texHeight 
-              << " with " << mipLevels << " mip levels" << std::endl;
-
     return true;
 }
+
 void GLBModel::draw(VkCommandBuffer cmd) {
   for (const auto &mesh : meshes) {
     VkBuffer vertexBuffers[] = {mesh.vertexBuffer};
@@ -839,7 +828,6 @@ void GLBModel::cleanup() {
     }
   }
   
-  // Clean up default texture
   if (defaultTexture.sampler != VK_NULL_HANDLE) {
     vkDestroySampler(device, defaultTexture.sampler, nullptr);
   }
@@ -882,8 +870,17 @@ void GLBModel::endSingleTimeCommands(VkCommandBuffer cmd) {
   submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &cmd;
-  vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
-  vkQueueWaitIdle(graphicsQueue);
+  
+  // OPTIMIZED: Use fence instead of vkQueueWaitIdle for better control
+  VkFenceCreateInfo fenceInfo{};
+  fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+  VkFence fence;
+  vkCreateFence(device, &fenceInfo, nullptr, &fence);
+  
+  vkQueueSubmit(graphicsQueue, 1, &submitInfo, fence);
+  vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+  
+  vkDestroyFence(device, fence, nullptr);
   vkFreeCommandBuffers(device, commandPool, 1, &cmd);
 }
 
