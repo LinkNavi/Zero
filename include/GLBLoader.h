@@ -51,6 +51,7 @@ struct GLBMesh {
     VmaAllocation indexAllocation;
     uint32_t indexCount = 0;
     int materialIndex = -1;
+    VkDescriptorSet descriptorSet = VK_NULL_HANDLE;  // Descriptor set for this mesh's texture
 };
 
 struct GLBMaterial {
@@ -75,16 +76,26 @@ class GLBModel {
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     
+    VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    VkDescriptorSet defaultDescriptorSet = VK_NULL_HANDLE;  // For meshes without textures
+    
+    // Default white texture for meshes without textures
+    GLBTexture defaultTexture;
+    
 public:
     std::vector<GLBMesh> meshes;
     std::vector<GLBMaterial> materials;
     std::vector<GLBTexture> textures;
     
-    bool load(const std::string& filepath, VmaAllocator alloc, VkDevice dev, VkCommandPool pool, VkQueue queue);
+    bool load(const std::string& filepath, VmaAllocator alloc, VkDevice dev, 
+              VkCommandPool pool, VkQueue queue, VkDescriptorSetLayout descriptorSetLayout);
     void draw(VkCommandBuffer cmd);
     void cleanup();
     
 private:
+    bool createDefaultTexture();
+    bool createDescriptorPool(VkDescriptorSetLayout descriptorSetLayout);
+    bool createDescriptorSets(VkDescriptorSetLayout descriptorSetLayout);
     bool processNode(const tinygltf::Model& model, const tinygltf::Node& node, glm::mat4 parentTransform);
     bool processMesh(const tinygltf::Model& model, const tinygltf::Mesh& mesh, glm::mat4 transform);
     bool loadTextures(const tinygltf::Model& model);

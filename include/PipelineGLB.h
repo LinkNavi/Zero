@@ -13,10 +13,11 @@ struct PushConstantsGLB {
     float padding1;
     glm::vec3 lightColor;
     float ambientStrength;
-    glm::vec4 materialColor;      // Material base color (rgb) + alpha for validity
+    glm::vec4 materialColor;
     float materialMetallic;
     float materialRoughness;
-    float padding2[2];
+    int hasBaseColorTexture;  // 0 or 1
+    int padding2;
 };
 
 class GLBPipeline {
@@ -25,6 +26,7 @@ class GLBPipeline {
     VkPipelineLayout pipelineLayout;
     VkShaderModule vertShaderModule;
     VkShaderModule fragShaderModule;
+    VkDescriptorSetLayout descriptorSetLayout;
 
 public:
     bool init(VkDevice dev, VkRenderPass renderPass, const std::string& vertPath, const std::string& fragPath) {
@@ -40,6 +42,12 @@ public:
         
         vertShaderModule = createShaderModule(vertCode);
         fragShaderModule = createShaderModule(fragCode);
+        
+        // Create descriptor set layout for texture sampling
+        if (!createDescriptorSetLayout()) {
+            std::cerr << "Failed to create descriptor set layout!" << std::endl;
+            return false;
+        }
         
         VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
         vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -149,6 +157,8 @@ public:
         
         VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
         pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        pipelineLayoutInfo.setLayoutCount = 1;
+        pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout;
         pipelineLayoutInfo.pushConstantRangeCount = 1;
         pipelineLayoutInfo.pPushConstantRanges = &pushConstantRange;
         
@@ -178,6 +188,7 @@ public:
             return false;
         }
         
+        std::cout << "✓ GLB pipeline created with texture support" << std::endl;
         return true;
     }
     
@@ -191,14 +202,44 @@ public:
                           0, sizeof(PushConstantsGLB), &constants);
     }
     
+    void bindDescriptorSet(VkCommandBuffer cmd, VkDescriptorSet descriptorSet) {
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                               pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
+    }
+    
+    VkDescriptorSetLayout getDescriptorSetLayout() const {
+        return descriptorSetLayout;
+    }
+    
     void cleanup() {
         vkDestroyPipeline(device, pipeline, nullptr);
         vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
         vkDestroyShaderModule(device, vertShaderModule, nullptr);
         vkDestroyShaderModule(device, fragShaderModule, nullptr);
     }
 
 private:
+    bool createDescriptorSetLayout() {
+        VkDescriptorSetLayoutBinding samplerLayoutBinding{};
+        samplerLayoutBinding.binding = 0;
+        samplerLayoutBinding.descriptorCount = 1;
+        samplerLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        samplerLayoutBinding.pImmutableSamplers = nullptr;
+        samplerLayoutBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+        
+        VkDescriptorSetLayoutCreateInfo layoutInfo{};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &samplerLayoutBinding;
+        
+        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS) {
+            return false;
+        }
+        
+        return true;
+    }
+    
     std::vector<char> readFile(const std::string& filename) {
         std::ifstream file(filename, std::ios::ate | std::ios::binary);
         if (!file.is_open()) {

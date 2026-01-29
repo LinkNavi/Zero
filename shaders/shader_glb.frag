@@ -1,49 +1,55 @@
-// GLB fragment shader with material support
 #version 450
 
 layout(location = 0) in vec3 fragNormal;
-layout(location = 1) in vec3 fragWorldPos;
-layout(location = 2) in vec2 fragTexCoord;
+layout(location = 1) in vec2 fragTexCoord;
+layout(location = 2) in vec3 fragWorldPos;
 
 layout(location = 0) out vec4 outColor;
 
+// Texture sampler
+layout(binding = 0) uniform sampler2D texSampler;
+
+// Push constants
 layout(push_constant) uniform PushConstants {
     mat4 mvp;
     mat4 model;
     vec3 lightDir;
-    float padding;
+    float padding1;
     vec3 lightColor;
     float ambientStrength;
-    vec4 materialColor;  // Material base color
+    vec4 materialColor;
     float materialMetallic;
     float materialRoughness;
+    int hasBaseColorTexture;  // 0 = use material color, 1 = use texture
+    int padding2;
 } push;
 
 void main() {
-    // Normalize inputs
+    // Sample texture or use material color
+    vec4 baseColor;
+    if (push.hasBaseColorTexture > 0) {
+        baseColor = texture(texSampler, fragTexCoord) * push.materialColor;
+    } else {
+        baseColor = push.materialColor;
+    }
+    
+    // Normalize the normal
     vec3 norm = normalize(fragNormal);
-    vec3 lightDirection = normalize(-push.lightDir);
+    vec3 lightDirection = normalize(push.lightDir);
     
     // Ambient
     vec3 ambient = push.ambientStrength * push.lightColor;
     
     // Diffuse
-    float diff = max(dot(norm, lightDirection), 0.0);
+    float diff = max(dot(norm, -lightDirection), 0.0);
     vec3 diffuse = diff * push.lightColor;
     
-    // Use material color if provided, otherwise use texture coordinates as color
-    vec3 baseColor = push.materialColor.rgb;
-    if (push.materialColor.a < 0.01) {
-        // No material color set, use procedural coloring based on normals and position
-        baseColor = abs(norm) * 0.5 + 0.5;
-    }
-    
-    // Simple metallic/roughness visualization
-    float specular = pow(max(dot(reflect(-lightDirection, norm), normalize(-fragWorldPos)), 0.0), 
-                        32.0 * (1.0 - push.materialRoughness));
-    vec3 specularColor = push.lightColor * specular * push.materialMetallic;
+    // Simple approximation of metallic/roughness
+    float specularFactor = (1.0 - push.materialRoughness) * push.materialMetallic;
+    vec3 specular = vec3(specularFactor * diff);
     
     // Combine
-    vec3 result = (ambient + diffuse) * baseColor + specularColor;
-    outColor = vec4(result, 1.0);
+    vec3 result = (ambient + diffuse + specular) * baseColor.rgb;
+    
+    outColor = vec4(result, baseColor.a);
 }

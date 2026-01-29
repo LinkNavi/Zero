@@ -5,7 +5,7 @@
 #include "Camera.h"
 #include "CameraController.h"
 #include "Config.h"
-#include "PipelineGLB.h"  // CHANGED: Was PipelineLit.h
+#include "PipelineGLB.h"
 #include "Engine.h"
 #include "GLBLoader.h"
 #include "Input.h"
@@ -64,7 +64,7 @@ class GLBRenderSystem : public System {
 public:
     ECS* ecs;
     VulkanRenderer* renderer;
-    GLBPipeline* pipeline;  // CHANGED: Was LitPipeline*
+    GLBPipeline* pipeline;
     Camera* camera;
     uint32_t width, height;
     glm::vec3 lightDir;
@@ -116,32 +116,55 @@ void GLBRenderSystem::update(float /*dt*/) {
         auto* glbComp = ecs->getComponent<GLBComponent>(entity);
 
         if (transform && glbComp && glbComp->model) {
-            glm::mat4 model = transform->getMatrix();
+            glm::mat4 modelMatrix = transform->getMatrix();
 
-            // Get material properties from the first material in the model
-            glm::vec4 materialColor = glm::vec4(0.5f, 0.7f, 0.3f, 1.0f);  // Default tree green
-            float metallic = 0.0f;
-            float roughness = 0.8f;
-            
-            if (!glbComp->model->materials.empty()) {
-                const auto& mat = glbComp->model->materials[0];
-                materialColor = mat.baseColor;
-                metallic = mat.metallic;
-                roughness = mat.roughness;
+            // Draw each mesh in the model with its own material and texture
+            for (size_t i = 0; i < glbComp->model->meshes.size(); i++) {
+                const auto& mesh = glbComp->model->meshes[i];
+                
+                // Get material properties
+                glm::vec4 materialColor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
+                float metallic = 0.0f;
+                float roughness = 0.8f;
+                int hasTexture = 0;
+                
+                if (mesh.materialIndex >= 0 && 
+                    mesh.materialIndex < glbComp->model->materials.size()) {
+                    const auto& mat = glbComp->model->materials[mesh.materialIndex];
+                    materialColor = mat.baseColor;
+                    metallic = mat.metallic;
+                    roughness = mat.roughness;
+                    
+                    // Check if this material has a texture
+                    if (mat.baseColorTexture >= 0 && 
+                        mat.baseColorTexture < glbComp->model->textures.size()) {
+                        hasTexture = 1;
+                    }
+                }
+
+                // Bind the descriptor set for this mesh (contains texture)
+                pipeline->bindDescriptorSet(cmd, mesh.descriptorSet);
+
+                PushConstantsGLB push{};
+                push.mvp = viewProj * modelMatrix;
+                push.model = modelMatrix;
+                push.lightDir = glm::normalize(lightDir);
+                push.lightColor = lightColor;
+                push.ambientStrength = ambientStrength;
+                push.materialColor = materialColor;
+                push.materialMetallic = metallic;
+                push.materialRoughness = roughness;
+                push.hasBaseColorTexture = hasTexture;
+
+                pipeline->pushConstants(cmd, push);
+                
+                // Draw this specific mesh
+                VkBuffer vertexBuffers[] = {mesh.vertexBuffer};
+                VkDeviceSize offsets[] = {0};
+                vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
+                vkCmdBindIndexBuffer(cmd, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+                vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
             }
-
-            PushConstantsGLB push{};
-            push.mvp = viewProj * model;
-            push.model = model;
-            push.lightDir = glm::normalize(lightDir);
-            push.lightColor = lightColor;
-            push.ambientStrength = ambientStrength;
-            push.materialColor = materialColor;
-            push.materialMetallic = metallic;
-            push.materialRoughness = roughness;
-
-            pipeline->pushConstants(cmd, push);
-            glbComp->model->draw(cmd);
         }
     }
 
@@ -170,7 +193,7 @@ int main() {
     setenv("GLYCIN_USE_SANDBOX", "0", 1);
     setenv("GTK_DISABLE_VALIDATION", "1", 1);
 
-    std::cout << "=== Zero Engine v0.4 - GLB Model Loading (Fixed) ===" << std::endl;
+    std::cout << "=== Zero Engine v0.5 - GLB with Full Texture Support ===" << std::endl;
 
     // Load configuration
     Config config;
@@ -180,9 +203,9 @@ int main() {
         std::cout << "✓ Configuration loaded" << std::endl;
     }
 
-    uint32_t width = config.get("window_width", 960);   // CHANGED: Default reduced
-    uint32_t height = config.get("window_height", 540);  // CHANGED: Default reduced
-    std::string title = config.getString("window_title", "Zero Engine");
+    uint32_t width = config.get("window_width", 960);
+    uint32_t height = config.get("window_height", 540);
+    std::string title = config.getString("window_title", "Zero Engine - GLB Textures");
 
     // Initialize Vulkan Renderer
     VulkanRenderer renderer;
@@ -200,30 +223,33 @@ int main() {
     Input::init(renderer.getWindow());
     std::cout << "✓ Input system initialized" << std::endl;
 
-    // Load GLB model
-    GLBModel treeModel;
-    if (!treeModel.load("models/tree.glb", renderer.getAllocator(),
-                        renderer.getDevice(), renderer.getCommandPool(),
-                        renderer.getGraphicsQueue())) {
-        std::cerr << "Failed to load GLB model!" << std::endl;
-        renderer.cleanup();
-        return -1;
-    }
-    std::cout << "✓ GLB model loaded" << std::endl;
-
-    // CHANGED: Create GLB-specific pipeline
+    // Create GLB pipeline FIRST (so we can get the descriptor set layout)
     GLBPipeline glbPipeline;
-    std::cout << "Loading GLB shaders..." << std::endl;
+    std::cout << "Loading GLB shaders with texture support..." << std::endl;
     if (!glbPipeline.init(renderer.getDevice(), renderer.getRenderPass(),
                          "shaders/vert_glb.spv", "shaders/frag_glb.spv")) {
         std::cerr << "Failed to create GLB pipeline!" << std::endl;
-        std::cerr << "Did you compile the shaders? Run:" << std::endl;
-        std::cerr << "  glslc shader_glb.vert -o shaders/vert_glb.spv" << std::endl;
-        std::cerr << "  glslc shader_glb.frag -o shaders/frag_glb.spv" << std::endl;
+        std::cerr << "Did you compile the NEW shaders? Run:" << std::endl;
+        std::cerr << "  glslc shader_glb_textures.vert -o shaders/vert_glb.spv" << std::endl;
+        std::cerr << "  glslc shader_glb_textures.frag -o shaders/frag_glb.spv" << std::endl;
         renderer.cleanup();
         return -1;
     }
-    std::cout << "✓ GLB graphics pipeline created" << std::endl;
+    std::cout << "✓ GLB graphics pipeline created with texture support" << std::endl;
+
+    // Load GLB model with descriptor set layout from pipeline
+    GLBModel treeModel;
+    std::cout << "Loading GLB model with textures..." << std::endl;
+    if (!treeModel.load("models/tree.glb", renderer.getAllocator(),
+                        renderer.getDevice(), renderer.getCommandPool(),
+                        renderer.getGraphicsQueue(),
+                        glbPipeline.getDescriptorSetLayout())) {
+        std::cerr << "Failed to load GLB model!" << std::endl;
+        glbPipeline.cleanup();
+        renderer.cleanup();
+        return -1;
+    }
+    std::cout << "✓ GLB model loaded with materials and textures" << std::endl;
 
     // Create camera
     Camera camera;
@@ -267,7 +293,7 @@ int main() {
     renderSystem->height = height;
     renderSystem->lightDir = config.getVec3("light_direction", glm::vec3(1, -1, 1));
     renderSystem->lightColor = config.getVec3("light_color", glm::vec3(1));
-    renderSystem->ambientStrength = config.get("ambient_strength", 0.5f);  // CHANGED: Higher default
+    renderSystem->ambientStrength = config.get("ambient_strength", 0.5f);
 
     ComponentMask renderMask;
     renderMask.set(0); // Transform
@@ -275,9 +301,9 @@ int main() {
     ecs.setSystemSignature<GLBRenderSystem>(renderMask);
     std::cout << "✓ GLB Render system registered" << std::endl;
 
-    // Create a grid of trees - OPTIMIZED FOR CHROMEBOOK
+    // Create a grid of trees
     std::cout << "Creating tree grid..." << std::endl;
-    int gridSize = config.get("grid_size", 2);  // CHANGED: Default reduced from 5 to 2
+    int gridSize = config.get("grid_size", 2);
     float spacing = config.get("grid_spacing", 2.5f);
 
     for (int x = -gridSize; x <= gridSize; x++) {
@@ -312,7 +338,7 @@ int main() {
     std::cout << "\n=== Starting render loop ===" << std::endl;
 
     // Performance settings
-    int maxFPS = config.get("max_fps", 30);  // CHANGED: Default 30 FPS for Chromebook
+    int maxFPS = config.get("max_fps", 30);
     float targetFrameTime = (maxFPS > 0) ? (1.0f / maxFPS) : 0.0f;
 
     // Main loop
