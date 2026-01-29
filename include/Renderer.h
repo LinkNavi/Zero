@@ -1,4 +1,6 @@
 #pragma once
+#define GLFW_INCLUDE_VULKAN
+#include <array>
 #include <vulkan/vulkan.h>
 #include <VkBootstrap.h>
 #include <vk_mem_alloc.h>
