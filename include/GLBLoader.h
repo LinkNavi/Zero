@@ -1,4 +1,4 @@
-// include/GLBLoader.h - Optimized version
+// include/GLBLoader.h - FIXED version
 #pragma once
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -94,7 +94,7 @@ public:
   void cleanup();
 
 private:
-  // OPTIMIZED: Pass command buffer to avoid creating new ones
+  // FIXED: Pass command buffer and return staging buffer for caller to clean up
   void generateMipmaps(VkCommandBuffer cmd, VkImage image, VkFormat format, 
                        int32_t width, int32_t height, uint32_t mipLevels);
   bool createDefaultTexture();
@@ -105,9 +105,10 @@ private:
   bool processMesh(const tinygltf::Model &model, const tinygltf::Mesh &mesh,
                    glm::mat4 transform);
   bool loadTextures(const tinygltf::Model &model);
-  // OPTIMIZED: Pass command buffer for batched texture upload
+  // FIXED: Now returns staging buffer for caller to clean up after GPU completes
   bool createTextureImage(const tinygltf::Image &image, GLBTexture &texture, 
-                          VkCommandBuffer cmd);
+                          VkCommandBuffer cmd, VkBuffer& outStagingBuffer, 
+                          VmaAllocation& outStagingAllocation);
   void transitionImageLayout(VkCommandBuffer cmd, VkImage image,
                              VkImageLayout oldLayout, VkImageLayout newLayout);
   VkCommandBuffer beginSingleTimeCommands();

@@ -1,4 +1,4 @@
-// Optimized GLBLoader.cpp with reduced synchronization and descriptor caching
+
 #define TINYGLTF_IMPLEMENTATION
 #define STB_IMAGE_IMPLEMENTATION
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -35,7 +35,7 @@ bool GLBModel::load(const std::string &filepath, VmaAllocator alloc,
     return false;
   }
 
-  // Load textures - OPTIMIZED: batch upload
+  // Load textures - FIXED: batch upload with proper cleanup
   if (!loadTextures(model)) {
     std::cerr << "Failed to load textures" << std::endl;
     return false;
@@ -111,7 +111,6 @@ bool GLBModel::load(const std::string &filepath, VmaAllocator alloc,
 void GLBModel::generateMipmaps(VkCommandBuffer cmd, VkImage image, VkFormat format,
                                int32_t width, int32_t height,
                                uint32_t mipLevels) {
-    // OPTIMIZED: Mipmap generation in single command buffer (passed in)
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.image = image;
@@ -334,7 +333,7 @@ bool GLBModel::createDescriptorSets(VkDescriptorSetLayout descriptorSetLayout) {
   
   vkUpdateDescriptorSets(device, 1, &descriptorWrite, 0, nullptr);
   
-  // OPTIMIZED: Batch allocate all descriptor sets at once
+  // Batch allocate all descriptor sets at once
   std::vector<VkDescriptorSetLayout> layouts(meshes.size(), descriptorSetLayout);
   std::vector<VkDescriptorSet> sets(meshes.size());
   
@@ -346,7 +345,7 @@ bool GLBModel::createDescriptorSets(VkDescriptorSetLayout descriptorSetLayout) {
     return false;
   }
   
-  // OPTIMIZED: Batch update descriptor sets
+  // Batch update descriptor sets
   std::vector<VkWriteDescriptorSet> writes;
   std::vector<VkDescriptorImageInfo> imageInfos;
   writes.reserve(meshes.size());
@@ -603,8 +602,12 @@ bool GLBModel::loadTextures(const tinygltf::Model &model) {
   
   std::cout << "Loading " << model.textures.size() << " textures (batched)..." << std::endl;
   
-  // OPTIMIZED: Single command buffer for all texture uploads
+  // FIXED: Single command buffer for all texture uploads with proper staging buffer lifetime
   VkCommandBuffer cmd = beginSingleTimeCommands();
+  
+  // Track staging buffers to clean up AFTER GPU completes
+  std::vector<VkBuffer> stagingBuffers;
+  std::vector<VmaAllocation> stagingAllocations;
   
   for (size_t i = 0; i < model.textures.size(); i++) {
     const auto &gltfTexture = model.textures[i];
@@ -617,23 +620,38 @@ bool GLBModel::loadTextures(const tinygltf::Model &model) {
     GLBTexture texture;
     const tinygltf::Image &image = model.images[gltfTexture.source];
 
-    if (!createTextureImage(image, texture, cmd)) {
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAllocation;
+    if (!createTextureImage(image, texture, cmd, stagingBuffer, stagingAllocation)) {
       std::cerr << "Failed to create texture image " << i << std::endl;
+      // Clean up any staging buffers created so far
+      for (size_t j = 0; j < stagingBuffers.size(); j++) {
+        vmaDestroyBuffer(allocator, stagingBuffers[j], stagingAllocations[j]);
+      }
       endSingleTimeCommands(cmd);
       return false;
     }
 
+    stagingBuffers.push_back(stagingBuffer);
+    stagingAllocations.push_back(stagingAllocation);
     textures.push_back(texture);
   }
   
-  // OPTIMIZED: Submit all texture uploads in one batch
+  // Submit all texture uploads in one batch and WAIT for GPU to finish
   endSingleTimeCommands(cmd);
+  
+  // NOW it's safe to clean up staging buffers - GPU has finished with them
+  for (size_t i = 0; i < stagingBuffers.size(); i++) {
+    vmaDestroyBuffer(allocator, stagingBuffers[i], stagingAllocations[i]);
+  }
   
   std::cout << "✓ Loaded " << textures.size() << " textures" << std::endl;
   return true;
 }
 
-bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &texture, VkCommandBuffer cmd) {
+bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &texture, 
+                                   VkCommandBuffer cmd, VkBuffer& outStagingBuffer, 
+                                   VmaAllocation& outStagingAllocation) {
     if (image.image.empty()) {
         std::cerr << "Empty image data!" << std::endl;
         return false;
@@ -666,8 +684,6 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
         return false;
     }
 
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAllocation;
     VkBufferCreateInfo bufferInfo{};
     bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
     bufferInfo.size = imageSize;
@@ -676,17 +692,17 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
 
-    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, 
-                        &stagingAllocation, nullptr) != VK_SUCCESS) {
+    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &outStagingBuffer, 
+                        &outStagingAllocation, nullptr) != VK_SUCCESS) {
         return false;
     }
 
     void *data;
-    vmaMapMemory(allocator, stagingAllocation, &data);
+    vmaMapMemory(allocator, outStagingAllocation, &data);
     memcpy(data, rgba.data(), imageSize);
-    vmaUnmapMemory(allocator, stagingAllocation);
+    vmaUnmapMemory(allocator, outStagingAllocation);
 
-    // OPTIMIZED: Reduce mip levels for Chromebook performance
+    // Reduce mip levels for performance
     uint32_t mipLevels = std::min(4u, static_cast<uint32_t>(std::floor(std::log2(std::max(texWidth, texHeight)))) + 1);
 
     VkImageCreateInfo imageInfo{};
@@ -711,7 +727,7 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
 
     if (vmaCreateImage(allocator, &imageInfo, &imgAllocInfo, 
                        &texture.image, &texture.allocation, nullptr) != VK_SUCCESS) {
-        vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+        vmaDestroyBuffer(allocator, outStagingBuffer, outStagingAllocation);
         return false;
     }
 
@@ -746,14 +762,13 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
     region.imageOffset = {0, 0, 0};
     region.imageExtent = {texWidth, texHeight, 1};
 
-    vkCmdCopyBufferToImage(cmd, stagingBuffer, texture.image, 
+    vkCmdCopyBufferToImage(cmd, outStagingBuffer, texture.image, 
                           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
     // Generate mipmaps in same command buffer
     generateMipmaps(cmd, texture.image, VK_FORMAT_R8G8B8A8_SRGB, texWidth, texHeight, mipLevels);
 
-    // Clean up staging buffer immediately (still valid while cmd is recording)
-    vmaDestroyBuffer(allocator, stagingBuffer, stagingAllocation);
+    // DON'T clean up staging buffer here - caller will do it after GPU finishes
 
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -770,7 +785,7 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
         return false;
     }
 
-    // OPTIMIZED: Reduced anisotropy for Chromebook
+    // Reduced anisotropy for Chromebook performance
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
     samplerInfo.magFilter = VK_FILTER_LINEAR;
@@ -779,7 +794,7 @@ bool GLBModel::createTextureImage(const tinygltf::Image &image, GLBTexture &text
     samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
     samplerInfo.anisotropyEnable = VK_TRUE;
-    samplerInfo.maxAnisotropy = 4.0f;  // Reduced from 16.0f for performance
+    samplerInfo.maxAnisotropy = 4.0f;
     samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
     samplerInfo.unnormalizedCoordinates = VK_FALSE;
     samplerInfo.compareEnable = VK_FALSE;
@@ -871,7 +886,7 @@ void GLBModel::endSingleTimeCommands(VkCommandBuffer cmd) {
   submitInfo.commandBufferCount = 1;
   submitInfo.pCommandBuffers = &cmd;
   
-  // OPTIMIZED: Use fence instead of vkQueueWaitIdle for better control
+  // Use fence for better control
   VkFenceCreateInfo fenceInfo{};
   fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
   VkFence fence;
