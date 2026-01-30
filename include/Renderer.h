@@ -59,9 +59,6 @@ class VulkanRenderer {
     uint32_t width, height;
     uint32_t currentFrame = 0;
     uint32_t imageIndex = 0;
-    
-    // Command buffer reuse flag
-    bool commandBuffersRecorded = false;
 
 public:
     bool init(uint32_t w, uint32_t h, const char* title) {
@@ -244,37 +241,33 @@ public:
         
         cmd = commandBuffers[imageIndex];
         
-        // Only reset and re-record if needed
-        if (!commandBuffersRecorded) {
-            vkResetCommandBuffer(cmd, 0);
-            
-            VkCommandBufferBeginInfo beginInfo = {};
-            beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-            beginInfo.flags = 0; // Reusable command buffer
-            vkBeginCommandBuffer(cmd, &beginInfo);
-            
-            VkRenderPassBeginInfo rpInfo = {};
-            rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-            rpInfo.renderPass = renderPass;
-            rpInfo.framebuffer = framebuffers[imageIndex];
-            rpInfo.renderArea.extent = {width, height};
-            
-            std::array<VkClearValue, 2> clearValues{};
-            clearValues[0].color = {{0.1f, 0.1f, 0.1f, 1.0f}};
-            clearValues[1].depthStencil = {1.0f, 0};
-            
-            rpInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-            rpInfo.pClearValues = clearValues.data();
-            
-            vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
-        }
+        // ALWAYS reset and re-record command buffer (this fixes the smearing bug)
+        vkResetCommandBuffer(cmd, 0);
+        
+        VkCommandBufferBeginInfo beginInfo = {};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        beginInfo.flags = 0;
+        vkBeginCommandBuffer(cmd, &beginInfo);
+        
+        VkRenderPassBeginInfo rpInfo = {};
+        rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rpInfo.renderPass = renderPass;
+        rpInfo.framebuffer = framebuffers[imageIndex];
+        rpInfo.renderArea.extent = {width, height};
+        
+        std::array<VkClearValue, 2> clearValues{};
+        clearValues[0].color = {{0.1f, 0.1f, 0.1f, 1.0f}};
+        clearValues[1].depthStencil = {1.0f, 0};
+        
+        rpInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+        rpInfo.pClearValues = clearValues.data();
+        
+        vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
     }
 
     void endFrame(VkCommandBuffer cmd) {
-        if (!commandBuffersRecorded) {
-            vkCmdEndRenderPass(cmd);
-            vkEndCommandBuffer(cmd);
-        }
+        vkCmdEndRenderPass(cmd);
+        vkEndCommandBuffer(cmd);
         
         // Reset fence only before submitting
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
@@ -317,8 +310,6 @@ public:
     VkCommandPool getCommandPool() { return commandPool; }
     VkQueue getGraphicsQueue() { return graphicsQueue; }
     VkPhysicalDevice getPhysicalDevice() { return physicalDevice; }
-    
-    void setCommandBuffersRecorded(bool recorded) { commandBuffersRecorded = recorded; }
 
     void cleanup() {
         vkDeviceWaitIdle(device);
@@ -539,26 +530,24 @@ private:
         return vkAllocateCommandBuffers(device, &allocInfo, commandBuffers.data()) == VK_SUCCESS;
     }
 
-  
-bool createSyncObjects() {
-    imagesInFlight.resize(swapchainImages.size(), VK_NULL_HANDLE);
+    bool createSyncObjects() {
+        imagesInFlight.resize(swapchainImages.size(), VK_NULL_HANDLE);
 
-    VkSemaphoreCreateInfo semInfo{};
-    semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+        VkSemaphoreCreateInfo semInfo{};
+        semInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-    VkFenceCreateInfo fenceInfo{};
-    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+        VkFenceCreateInfo fenceInfo{};
+        fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        if (vkCreateSemaphore(device, &semInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
-            vkCreateSemaphore(device, &semInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
-            vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
-            return false;
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+            if (vkCreateSemaphore(device, &semInfo, nullptr, &imageAvailableSemaphores[i]) != VK_SUCCESS ||
+                vkCreateSemaphore(device, &semInfo, nullptr, &renderFinishedSemaphores[i]) != VK_SUCCESS ||
+                vkCreateFence(device, &fenceInfo, nullptr, &inFlightFences[i]) != VK_SUCCESS) {
+                return false;
+            }
         }
+
+        return true;
     }
-
-    return true;
-}
-
 };

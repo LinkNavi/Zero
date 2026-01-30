@@ -187,9 +187,9 @@ int main() {
     setenv("GLYCIN_USE_SANDBOX", "0", 1);
     setenv("GTK_DISABLE_VALIDATION", "1", 1);
 
-    std::cout << "=== Zero Engine v0.6 - OPTIMIZED ===" << std::endl;
-    std::cout << "Optimizations: Double buffering, batch texture loading," << std::endl;
-    std::cout << "               command buffer reuse, reduced texture quality" << std::endl;
+    std::cout << "=== Zero Engine v0.6 - FIXED ===" << std::endl;
+    std::cout << "Bug Fix: Removed command buffer reuse that caused smearing" << std::endl;
+    std::cout << "Optimizations: Double buffering, batch texture loading" << std::endl;
     std::cout << std::endl;
 
     Config config;
@@ -201,7 +201,7 @@ int main() {
 
     uint32_t width = config.get("window_width", 960);
     uint32_t height = config.get("window_height", 540);
-    std::string title = config.getString("window_title", "Zero Engine - OPTIMIZED");
+    std::string title = config.getString("window_title", "Zero Engine - FIXED");
 
     VulkanRenderer renderer;
     if (!renderer.init(width, height, title.c_str())) {
@@ -329,11 +329,8 @@ int main() {
     std::cout << "  ESC        - Exit" << std::endl;
     std::cout << "\n=== Performance Info ===" << std::endl;
     std::cout << "  Entities: " << entityCount << std::endl;
-    std::cout << "  Optimizations: ENABLED" << std::endl;
-    std::cout << "  - Double buffering" << std::endl;
-    std::cout << "  - Command buffer reuse" << std::endl;
-    std::cout << "  - Batch texture loading" << std::endl;
-    std::cout << "  - Reduced texture quality (4x aniso, 4 mip levels)" << std::endl;
+    std::cout << "  Optimizations: Double buffering, Batch texture loading" << std::endl;
+    std::cout << "  Bug Fix: Smearing issue FIXED" << std::endl;
     std::cout << "\n=== Starting render loop ===" << std::endl;
 
     int maxFPS = config.get("max_fps", 0);
@@ -342,9 +339,6 @@ int main() {
     int frameCount = 0;
     float fpsTimer = 0.0f;
     bool showFPS = config.get("show_fps", 1);
-    
-    // OPTIMIZATION: Enable command buffer reuse after first frame
-    bool commandBuffersRecorded = false;
 
     while (!renderer.shouldClose() && !Input::getKey(Key::Escape)) {
         Time::update();
@@ -362,13 +356,6 @@ int main() {
         cameraController.update(dt, renderer.getWindow());
 
         ecs.updateSystems(dt);
-
-        // OPTIMIZATION: After first frame, enable command buffer reuse
-        if (frameCount == 1 && !commandBuffersRecorded) {
-            renderer.setCommandBuffersRecorded(true);
-            commandBuffersRecorded = true;
-            std::cout << "✓ Command buffer reuse enabled" << std::endl;
-        }
 
         if (showFPS) {
             frameCount++;
@@ -406,8 +393,7 @@ int main() {
     renderer.cleanup();
 
     std::cout << "✓ Clean shutdown complete" << std::endl;
-    std::cout << "\nOptimizations successfully applied!" << std::endl;
-    std::cout << "If FPS is still low, try reducing grid_size in config.ini" << std::endl;
+    std::cout << "\nSmearing bug fixed! Models should render cleanly now." << std::endl;
 
     return 0;
 }
