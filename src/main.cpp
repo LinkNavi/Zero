@@ -11,7 +11,8 @@
 
 #include "Renderer.h"
 #include "PipelineInstanced.h"
-#include "GLBLoaderOpt.h"
+
+#include "ModelLoader.h"
 #include "Camera.h"
 #include "CameraController.h"
 #include "Config.h"
@@ -91,27 +92,39 @@ int main() {
     Time::init();
     Input::init(renderer.getWindow());
 
-    InstancedPipeline pipeline;
-    if (!pipeline.init(renderer.getDevice(), renderer.getRenderPass(),
-                      "shaders/instanced_vert.spv", "shaders/instanced_frag.spv")) {
-        std::cerr << "Pipeline init failed!" << std::endl;
-        renderer.cleanup();
-        return -1;
-    }
+ 
 
     std::string modelPath = config.getString("model_path", "models/tree.glb");
-    // Remove quotes if present
-    if (modelPath.front() == '"') modelPath = modelPath.substr(1, modelPath.size() - 2);
-    
-    GLBModelOpt model;
-    if (!model.load(modelPath, renderer.getAllocator(), renderer.getDevice(),
-                    renderer.getCommandPool(), renderer.getGraphicsQueue(),
-                    pipeline.getDescriptorSetLayout())) {
-        std::cerr << "Model load failed!" << std::endl;
-        pipeline.cleanup();
-        renderer.cleanup();
-        return -1;
-    }
+ VkDescriptorPoolSize poolSize{};
+poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+poolSize.descriptorCount = 100;
+
+VkDescriptorPoolCreateInfo poolInfo{};
+poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+poolInfo.poolSizeCount = 1;
+poolInfo.pPoolSizes = &poolSize;
+poolInfo.maxSets = 100;
+
+VkDescriptorPool descriptorPool;
+vkCreateDescriptorPool(renderer.getDevice(), &poolInfo, nullptr, &descriptorPool);
+
+InstancedPipeline pipeline;
+pipeline.init(renderer.getDevice(), renderer.getRenderPass(),
+              "shaders/instanced_vert.spv", "shaders/instanced_frag.spv");
+
+ModelLoader modelLoader;
+modelLoader.init(renderer.getDevice(), renderer.getAllocator(), 
+                renderer.getCommandPool(), renderer.getGraphicsQueue(),
+                descriptorPool, pipeline.getDescriptorSetLayout());
+
+Model model = modelLoader.load(modelPath);
+if (model.vertices.empty()) {
+    std::cerr << "Model load failed!" << std::endl;
+    return -1;
+}
+
+std::cout << "✓ Loaded model: " << model.submeshes.size() << " submeshes, "
+          << model.vertices.size() << " vertices" << std::endl;
 
     Camera camera;
     camera.position = config.getVec3("camera_position", glm::vec3(0, 2, 8));
@@ -288,7 +301,9 @@ int main() {
     std::cout << "\nShutting down..." << std::endl;
     
     instanceBuffer.cleanup();
-    model.cleanup();
+   modelLoader.cleanup(model);
+modelLoader.cleanupLoader();
+vkDestroyDescriptorPool(renderer.getDevice(), descriptorPool, nullptr);
     pipeline.cleanup();
     renderer.cleanup();
 
