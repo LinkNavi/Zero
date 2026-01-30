@@ -7,17 +7,15 @@ language = "cpp"
 dirs = ["src"]
 
 [includes]
-dirs = ["include", "external","external/Vulkan-Headers/include"]
+dirs = ["include", "external", "external/Vulkan-Headers/include"]
 
 [build]
 flags = ["-Wall", "-Wextra", "-Wpedantic"]
 optimization = "2"
-libs = ["glfw", "vulkan"]
+libs = ["glfw", "vulkan", "assimp"]
+
 [deps]
 
 [scripts]
-# Custom build scripts can be defined here
-# prebuild = "echo 'Running prebuild'"
-# postbuild = "echo 'Build complete'"
-
-
+prebuild = "for f in shaders/*.vert shaders/*.frag; do [ -f \"$f\" ] && glslc \"$f\" -o \"${f%.*}_${f##*.}.spv\"; done"
+postbuild = "echo 'Build complete - $(ls shaders/*.spv 2>/dev/null | wc -l) shaders compiled'"

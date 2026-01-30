@@ -278,7 +278,8 @@ int main() {
         if (fpsTimer >= 1.0f) {
             std::cout << "FPS: " << frameCount 
                       << " | Visible: " << visibleCount << "/" << entities.size()
-                      << " | Culled: " << (entities.size() - visibleCount) << std::endl;
+                      << " | Culled: " << (entities.size() - visibleCount)
+                      << " | FrameTime: " << (1000.0f / (frameCount / fpsTimer)) << "ms" << std::endl;
             frameCount = 0;
             fpsTimer = 0;
         }
