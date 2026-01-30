@@ -1,5 +1,6 @@
 #pragma once
 #define GLFW_INCLUDE_VULKAN
+#include <algorithm>
 #include <array>
 #include <vulkan/vulkan.h>
 #include <VkBootstrap.h>
@@ -10,8 +11,8 @@
 #include <iostream>
 #include <cstring>
 
-// FIXED: Triple buffering eliminates stutters with VSync
-constexpr int MAX_FRAMES_IN_FLIGHT = 3;
+// OPTIMIZED: Double buffering is sufficient for iGPU
+constexpr int MAX_FRAMES_IN_FLIGHT = 2;
 
 struct AllocatedBuffer {
     VkBuffer buffer;
@@ -47,11 +48,9 @@ class VulkanRenderer {
     VkCommandPool commandPool;
     std::vector<VkCommandBuffer> commandBuffers;
     
-    // Depth buffer
     AllocatedImage depthImage;
     VkFormat depthFormat;
     
-    // TRIPLE buffering for smooth VSync performance
     std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> imageAvailableSemaphores;
     std::array<VkSemaphore, MAX_FRAMES_IN_FLIGHT> renderFinishedSemaphores;
     std::array<VkFence, MAX_FRAMES_IN_FLIGHT> inFlightFences;
@@ -59,70 +58,49 @@ class VulkanRenderer {
     uint32_t width, height;
     uint32_t currentFrame = 0;
     uint32_t imageIndex = 0;
-    bool framebufferResized = false;
 
 public:
     bool init(uint32_t w, uint32_t h, const char* title) {
         width = w;
         height = h;
         
-        std::cout << "  - Initializing GLFW..." << std::endl;
-        
         glfwSetErrorCallback([](int error, const char* description) {
             std::cerr << "GLFW Error " << error << ": " << description << std::endl;
         });
         
-        if (!glfwInit()) {
-            std::cerr << "ERROR: Failed to initialize GLFW!" << std::endl;
-            return false;
-        }
-        
+        if (!glfwInit()) return false;
         if (!glfwVulkanSupported()) {
-            std::cerr << "ERROR: GLFW reports Vulkan is not supported!" << std::endl;
             glfwTerminate();
             return false;
         }
-        std::cout << "  ✓ GLFW Vulkan support confirmed" << std::endl;
         
-        // Fix for Hyprland: Disable resizing to prevent compositor interference
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);  // Enable but we'll constrain it
-        
-        // Force window size constraints
-        glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
-        glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
+        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
         
         window = glfwCreateWindow(width, height, title, nullptr, nullptr);
-        
         if (!window) {
-            std::cerr << "ERROR: Failed to create GLFW window!" << std::endl;
             glfwTerminate();
             return false;
         }
-        std::cout << "  ✓ GLFW window created" << std::endl;
         
-        // Set fixed window size limits to prevent Hyprland from resizing
-        glfwSetWindowSizeLimits(window, width, height, width, height);
+        // On Wayland/Hyprland: poll events to let compositor set final size
+        for (int i = 0; i < 10; i++) {
+            glfwPollEvents();
+        }
         
-        // Wayland-specific: explicitly set the window size again
-        glfwSetWindowSize(window, width, height);
-        
-        // Store pointer for callbacks
-        glfwSetWindowUserPointer(window, this);
+        // Get actual framebuffer size (compositor may have changed it)
+        int fbWidth, fbHeight;
+        glfwGetFramebufferSize(window, &fbWidth, &fbHeight);
+        if (fbWidth > 0 && fbHeight > 0) {
+            width = static_cast<uint32_t>(fbWidth);
+            height = static_cast<uint32_t>(fbHeight);
+        }
+        std::cout << "  Window framebuffer: " << width << "x" << height << std::endl;
         
         uint32_t glfwExtensionCount = 0;
         const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
         
-        if (glfwExtensions == nullptr || glfwExtensionCount == 0) {
-            std::cerr << "ERROR: Failed to get required Vulkan extensions from GLFW!" << std::endl;
-            glfwDestroyWindow(window);
-            glfwTerminate();
-            return false;
-        }
-        
-        std::cout << "  - Creating Vulkan instance..." << std::endl;
         vkb::InstanceBuilder builder;
-        
         for (uint32_t i = 0; i < glfwExtensionCount; i++) {
             builder.enable_extension(glfwExtensions[i]);
         }
@@ -134,53 +112,28 @@ public:
             .require_api_version(1, 0, 0)
             .build();
         
-        if (!instRet) {
-            std::cerr << "ERROR: Failed to create Vulkan instance!" << std::endl;
-            std::cerr << "Reason: " << instRet.error().message() << std::endl;
-            glfwDestroyWindow(window);
-            glfwTerminate();
-            return false;
-        }
+        if (!instRet) return false;
         vkbInstance = instRet.value();
         instance = vkbInstance.instance;
-        std::cout << "  ✓ Vulkan instance created" << std::endl;
         
-        std::cout << "  - Creating window surface..." << std::endl;
-        VkResult surfaceResult = glfwCreateWindowSurface(instance, window, nullptr, &surface);
-        if (surfaceResult != VK_SUCCESS) {
-            std::cerr << "ERROR: Failed to create window surface! Code: " << surfaceResult << std::endl;
+        if (glfwCreateWindowSurface(instance, window, nullptr, &surface) != VK_SUCCESS) {
             return false;
         }
-        std::cout << "  ✓ Window surface created" << std::endl;
         
-        std::cout << "  - Selecting physical device..." << std::endl;
         vkb::PhysicalDeviceSelector selector{vkbInstance};
-        auto physRet = selector
-            .set_surface(surface)
-            .set_minimum_version(1, 0)
-            .select();
+        auto physRet = selector.set_surface(surface).set_minimum_version(1, 0).select();
+        if (!physRet) return false;
         
-        if (!physRet) {
-            std::cerr << "ERROR: Failed to select physical device!" << std::endl;
-            std::cerr << "Reason: " << physRet.error().message() << std::endl;
-            return false;
-        }
         vkb::PhysicalDevice vkbPhysicalDevice = physRet.value();
-        std::cout << "  ✓ Physical device: " << vkbPhysicalDevice.name << std::endl;
+        std::cout << "GPU: " << vkbPhysicalDevice.name << std::endl;
         
-        std::cout << "  - Creating logical device..." << std::endl;
         vkb::DeviceBuilder deviceBuilder{vkbPhysicalDevice};
         auto devRet = deviceBuilder.build();
-        if (!devRet) {
-            std::cerr << "ERROR: Failed to create logical device!" << std::endl;
-            std::cerr << "Reason: " << devRet.error().message() << std::endl;
-            return false;
-        }
+        if (!devRet) return false;
         
         vkbDevice = devRet.value();
         device = vkbDevice.device;
         physicalDevice = vkbPhysicalDevice.physical_device;
-        std::cout << "  ✓ Logical device created" << std::endl;
         
         auto gqRet = vkbDevice.get_queue(vkb::QueueType::graphics);
         if (!gqRet) return false;
@@ -189,93 +142,42 @@ public:
         auto pqRet = vkbDevice.get_queue(vkb::QueueType::present);
         if (!pqRet) return false;
         presentQueue = pqRet.value();
-        std::cout << "  ✓ Queues acquired" << std::endl;
-        
-        std::cout << "  - Initializing VMA allocator..." << std::endl;
-        
-        // Query actual surface capabilities to prevent size mismatch
-        VkSurfaceCapabilitiesKHR surfaceCaps;
-        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCaps);
-        
-        // Clamp to supported range
-        if (surfaceCaps.currentExtent.width != 0xFFFFFFFF) {
-            width = surfaceCaps.currentExtent.width;
-            height = surfaceCaps.currentExtent.height;
-            std::cout << "  ! Surface extent override: " << width << "x" << height << std::endl;
-        }
-        
-        // Update window size to match
-        glfwSetWindowSize(window, width, height);
         
         VmaAllocatorCreateInfo allocatorInfo = {};
         allocatorInfo.physicalDevice = physicalDevice;
         allocatorInfo.device = device;
         allocatorInfo.instance = instance;
-        if (vmaCreateAllocator(&allocatorInfo, &allocator) != VK_SUCCESS) {
-            std::cerr << "ERROR: Failed to create VMA allocator!" << std::endl;
-            return false;
-        }
-        std::cout << "  ✓ VMA allocator created" << std::endl;
+        if (vmaCreateAllocator(&allocatorInfo, &allocator) != VK_SUCCESS) return false;
         
         depthFormat = findDepthFormat();
-        std::cout << "  ✓ Depth format selected" << std::endl;
         
-        std::cout << "  - Creating swapchain..." << std::endl;
         if (!createSwapchain()) return false;
-        std::cout << "  ✓ Swapchain created" << std::endl;
-        
-        std::cout << "  - Creating depth buffer..." << std::endl;
         if (!createDepthResources()) return false;
-        std::cout << "  ✓ Depth buffer created" << std::endl;
-        
-        std::cout << "  - Creating render pass..." << std::endl;
         if (!createRenderPass()) return false;
-        std::cout << "  ✓ Render pass created" << std::endl;
-        
-        std::cout << "  - Creating framebuffers..." << std::endl;
         if (!createFramebuffers()) return false;
-        std::cout << "  ✓ Framebuffers created (" << framebuffers.size() << ")" << std::endl;
-        
-        std::cout << "  - Creating command pool..." << std::endl;
         if (!createCommandPool()) return false;
-        std::cout << "  ✓ Command pool created" << std::endl;
-        
-        std::cout << "  - Creating command buffers..." << std::endl;
         if (!createCommandBuffers()) return false;
-        std::cout << "  ✓ Command buffers created" << std::endl;
-        
-        std::cout << "  - Creating sync objects..." << std::endl;
         if (!createSyncObjects()) return false;
-        std::cout << "  ✓ Sync objects created (TRIPLE buffered - stutter fix)" << std::endl;
         
         return true;
     }
 
     void beginFrame(VkCommandBuffer& cmd) {
-        // With triple buffering, we wait for frame N-3 to complete
-        // This gives GPU plenty of time to work without stalling
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
         
-        // Acquire next image - may return immediately or wait for VSync
         VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, 
             imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
         
-        if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) {
-            std::cerr << "Failed to acquire swapchain image!" << std::endl;
-            return;
-        }
+        if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) return;
         
-        // Reset fence only after we know which frame we're working on
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
         
-        cmd = commandBuffers[imageIndex];
-        
-        // Reset and re-record command buffer (fixes smearing bug)
+        cmd = commandBuffers[currentFrame];
         vkResetCommandBuffer(cmd, 0);
         
         VkCommandBufferBeginInfo beginInfo = {};
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-        beginInfo.flags = 0;
+        beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(cmd, &beginInfo);
         
         VkRenderPassBeginInfo rpInfo = {};
@@ -285,7 +187,7 @@ public:
         rpInfo.renderArea.extent = {width, height};
         
         std::array<VkClearValue, 2> clearValues{};
-        clearValues[0].color = {{0.1f, 0.1f, 0.1f, 1.0f}};
+        clearValues[0].color = {{0.05f, 0.05f, 0.08f, 1.0f}};
         clearValues[1].depthStencil = {1.0f, 0};
         
         rpInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
@@ -309,9 +211,7 @@ public:
         submitInfo.signalSemaphoreCount = 1;
         submitInfo.pSignalSemaphores = &renderFinishedSemaphores[currentFrame];
         
-        if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]) != VK_SUCCESS) {
-            std::cerr << "Failed to submit draw command buffer!" << std::endl;
-        }
+        vkQueueSubmit(graphicsQueue, 1, &submitInfo, inFlightFences[currentFrame]);
         
         VkPresentInfoKHR presentInfo = {};
         presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -336,6 +236,8 @@ public:
     VkCommandPool getCommandPool() { return commandPool; }
     VkQueue getGraphicsQueue() { return graphicsQueue; }
     VkPhysicalDevice getPhysicalDevice() { return physicalDevice; }
+    uint32_t getWidth() const { return width; }
+    uint32_t getHeight() const { return height; }
 
     void cleanup() {
         vkDeviceWaitIdle(device);
@@ -371,22 +273,21 @@ public:
 
 private:
     VkFormat findDepthFormat() {
+        // D16 is faster on Intel iGPU
         std::vector<VkFormat> candidates = {
+            VK_FORMAT_D16_UNORM,
             VK_FORMAT_D32_SFLOAT,
-            VK_FORMAT_D32_SFLOAT_S8_UINT,
             VK_FORMAT_D24_UNORM_S8_UINT
         };
         
         for (VkFormat format : candidates) {
             VkFormatProperties props;
             vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
-            
             if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) {
                 return format;
             }
         }
-        
-        return VK_FORMAT_D32_SFLOAT;
+        return VK_FORMAT_D16_UNORM;
     }
     
     bool createDepthResources() {
@@ -409,7 +310,6 @@ private:
         allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
         
         if (vmaCreateImage(allocator, &imageInfo, &allocInfo, &depthImage.image, &depthImage.allocation, nullptr) != VK_SUCCESS) {
-            std::cerr << "Failed to create depth image!" << std::endl;
             return false;
         }
         
@@ -424,27 +324,37 @@ private:
         viewInfo.subresourceRange.baseArrayLayer = 0;
         viewInfo.subresourceRange.layerCount = 1;
         
-        if (vkCreateImageView(device, &viewInfo, nullptr, &depthImage.view) != VK_SUCCESS) {
-            std::cerr << "Failed to create depth image view!" << std::endl;
-            return false;
-        }
-        
-        return true;
+        return vkCreateImageView(device, &viewInfo, nullptr, &depthImage.view) == VK_SUCCESS;
     }
 
     bool createSwapchain() {
+        // Query actual surface capabilities - Wayland/Hyprland may override size
+        VkSurfaceCapabilitiesKHR surfaceCaps;
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCaps);
+        
+        // Use the surface's current extent if it's defined
+        if (surfaceCaps.currentExtent.width != 0xFFFFFFFF) {
+            width = surfaceCaps.currentExtent.width;
+            height = surfaceCaps.currentExtent.height;
+        }
+        
+        // Clamp to valid range
+        width = std::max(surfaceCaps.minImageExtent.width, 
+                std::min(surfaceCaps.maxImageExtent.width, width));
+        height = std::max(surfaceCaps.minImageExtent.height,
+                 std::min(surfaceCaps.maxImageExtent.height, height));
+        
+        std::cout << "  Swapchain size: " << width << "x" << height << std::endl;
+        
         vkb::SwapchainBuilder swapchainBuilder{vkbDevice};
         auto swapRet = swapchainBuilder
-            .set_desired_format({VK_FORMAT_B8G8R8A8_SRGB, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
+            .set_desired_format({VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
             .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
             .set_desired_extent(width, height)
+            .set_desired_min_image_count(2)
             .build();
         
-        if (!swapRet) {
-            std::cerr << "ERROR: Failed to create swapchain!" << std::endl;
-            std::cerr << "Reason: " << swapRet.error().message() << std::endl;
-            return false;
-        }
+        if (!swapRet) return false;
         
         vkbSwapchain = swapRet.value();
         swapchain = vkbSwapchain.swapchain;
@@ -456,7 +366,7 @@ private:
 
     bool createRenderPass() {
         VkAttachmentDescription colorAttachment = {};
-        colorAttachment.format = VK_FORMAT_B8G8R8A8_SRGB;
+        colorAttachment.format = VK_FORMAT_B8G8R8A8_UNORM;
         colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
         colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -545,7 +455,7 @@ private:
     }
 
     bool createCommandBuffers() {
-        commandBuffers.resize(swapchainImages.size());
+        commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
         
         VkCommandBufferAllocateInfo allocInfo = {};
         allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -571,7 +481,6 @@ private:
                 return false;
             }
         }
-
         return true;
     }
 };

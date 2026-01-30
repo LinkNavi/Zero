@@ -2,251 +2,115 @@
 #define VMA_IMPLEMENTATION
 #include <vk_mem_alloc.h>
 
+// Note: TINYGLTF_IMPLEMENTATION should be defined in exactly ONE .cpp file
+// If you have GLBLoader.cpp, define it there. Otherwise uncomment below:
+// #define TINYGLTF_IMPLEMENTATION
+// #define STB_IMAGE_IMPLEMENTATION  
+// #define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <tiny_gltf.h>
+
+#include "Renderer.h"
+#include "PipelineInstanced.h"
+#include "GLBLoaderOpt.h"
 #include "Camera.h"
 #include "CameraController.h"
 #include "Config.h"
-#include "ResourcePath.h"
-#include "PipelineGLB.h"
-#include "Engine.h"
-#include "GLBLoader.h"
 #include "Input.h"
-#include "Renderer.h"
 #include "Time.h"
-#include <cstdlib>
+
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
+#include <cstdlib>
 
-// Components
-struct Transform : Component {
-    glm::vec3 position;
-    glm::vec3 rotation;
-    glm::vec3 scale;
-
-    Transform() : position(0.0f), rotation(0.0f), scale(1.0f) {}
-    Transform(glm::vec3 p, glm::vec3 r, glm::vec3 s)
-        : position(p), rotation(r), scale(s) {}
-
-    glm::mat4 getMatrix() const {
-        glm::mat4 mat = glm::mat4(1.0f);
-        mat = glm::translate(mat, position);
-        mat = glm::rotate(mat, rotation.x, glm::vec3(1, 0, 0));
-        mat = glm::rotate(mat, rotation.y, glm::vec3(0, 1, 0));
-        mat = glm::rotate(mat, rotation.z, glm::vec3(0, 0, 1));
-        mat = glm::scale(mat, scale);
-        return mat;
+// Simple frustum for culling
+struct Frustum {
+    glm::vec4 planes[6];
+    
+    void update(const glm::mat4& vp) {
+        // Extract frustum planes from view-projection matrix
+        planes[0] = glm::vec4(vp[0][3] + vp[0][0], vp[1][3] + vp[1][0], vp[2][3] + vp[2][0], vp[3][3] + vp[3][0]); // Left
+        planes[1] = glm::vec4(vp[0][3] - vp[0][0], vp[1][3] - vp[1][0], vp[2][3] - vp[2][0], vp[3][3] - vp[3][0]); // Right
+        planes[2] = glm::vec4(vp[0][3] + vp[0][1], vp[1][3] + vp[1][1], vp[2][3] + vp[2][1], vp[3][3] + vp[3][1]); // Bottom
+        planes[3] = glm::vec4(vp[0][3] - vp[0][1], vp[1][3] - vp[1][1], vp[2][3] - vp[2][1], vp[3][3] - vp[3][1]); // Top
+        planes[4] = glm::vec4(vp[0][3] + vp[0][2], vp[1][3] + vp[1][2], vp[2][3] + vp[2][2], vp[3][3] + vp[3][2]); // Near
+        planes[5] = glm::vec4(vp[0][3] - vp[0][2], vp[1][3] - vp[1][2], vp[2][3] - vp[2][2], vp[3][3] - vp[3][2]); // Far
+        
+        for (int i = 0; i < 6; i++) {
+            float len = glm::length(glm::vec3(planes[i]));
+            planes[i] /= len;
+        }
     }
-};
-
-struct Velocity : Component {
-    glm::vec3 linear;
-    glm::vec3 angular;
-
-    Velocity() : linear(0.0f), angular(0.0f) {}
-    Velocity(glm::vec3 l, glm::vec3 a) : linear(l), angular(a) {}
-};
-
-struct GLBComponent : Component {
-    GLBModel* model = nullptr;
-};
-
-class ECS;
-
-// Systems
-class RotationSystem : public System {
-public:
-    ECS* ecs;
-    RotationSystem() : ecs(nullptr) {}
-    void update(float dt) override;
-};
-
-class GLBRenderSystem : public System {
-public:
-    ECS* ecs;
-    VulkanRenderer* renderer;
-    GLBPipeline* pipeline;
-    Camera* camera;
-    uint32_t width, height;
-    glm::vec3 lightDir;
-    glm::vec3 lightColor;
-    float ambientStrength;
-
-    GLBRenderSystem()
-        : ecs(nullptr), renderer(nullptr), pipeline(nullptr),
-          camera(nullptr), width(0), height(0), lightDir(1, -1, 1),
-          lightColor(1, 1, 1), ambientStrength(0.3f) {}
-
-    void update(float /*dt*/) override;
-};
-
-void GLBRenderSystem::update(float /*dt*/) {
-    if (!renderer || !camera || !ecs || !pipeline) {
-        std::cerr << "GLBRenderSystem: null pointer detected!" << std::endl;
-        return;
-    }
-
-    VkCommandBuffer cmd = VK_NULL_HANDLE;
-    renderer->beginFrame(cmd);
-
-    if (cmd == VK_NULL_HANDLE) {
-        std::cerr << "GLBRenderSystem: Failed to get command buffer!" << std::endl;
-        return;
-    }
-
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = static_cast<float>(width);
-    viewport.height = static_cast<float>(height);
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = {width, height};
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-    pipeline->bind(cmd);
-
-    glm::mat4 viewProj = camera->getViewProjectionMatrix();
-
-    for (EntityID entity : entities) {
-        auto* transform = ecs->getComponent<Transform>(entity);
-        auto* glbComp = ecs->getComponent<GLBComponent>(entity);
-
-        if (transform && glbComp && glbComp->model) {
-            glm::mat4 modelMatrix = transform->getMatrix();
-
-            for (size_t i = 0; i < glbComp->model->meshes.size(); i++) {
-                const auto& mesh = glbComp->model->meshes[i];
-                
-                glm::vec4 materialColor = glm::vec4(0.8f, 0.8f, 0.8f, 1.0f);
-                float metallic = 0.0f;
-                float roughness = 0.8f;
-                int hasTexture = 0;
-                
-                if (mesh.materialIndex >= 0 && 
-                    mesh.materialIndex < glbComp->model->materials.size()) {
-                    const auto& mat = glbComp->model->materials[mesh.materialIndex];
-                    materialColor = mat.baseColor;
-                    metallic = mat.metallic;
-                    roughness = mat.roughness;
-                    
-                    if (mat.baseColorTexture >= 0 && 
-                        mat.baseColorTexture < glbComp->model->textures.size()) {
-                        hasTexture = 1;
-                    }
-                }
-
-                pipeline->bindDescriptorSet(cmd, mesh.descriptorSet);
-
-                PushConstantsGLB push{};
-                push.mvp = viewProj * modelMatrix;
-                push.model = modelMatrix;
-                push.lightDir = glm::normalize(lightDir);
-                push.lightColor = lightColor;
-                push.ambientStrength = ambientStrength;
-                push.materialColor = materialColor;
-                push.materialMetallic = metallic;
-                push.materialRoughness = roughness;
-                push.hasBaseColorTexture = hasTexture;
-
-                pipeline->pushConstants(cmd, push);
-                
-                VkBuffer vertexBuffers[] = {mesh.vertexBuffer};
-                VkDeviceSize offsets[] = {0};
-                vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, offsets);
-                vkCmdBindIndexBuffer(cmd, mesh.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-                vkCmdDrawIndexed(cmd, mesh.indexCount, 1, 0, 0, 0);
+    
+    bool sphereInFrustum(glm::vec3 center, float radius) const {
+        for (int i = 0; i < 6; i++) {
+            if (glm::dot(glm::vec3(planes[i]), center) + planes[i].w + radius < 0) {
+                return false;
             }
         }
+        return true;
     }
+};
 
-    renderer->endFrame(cmd);
-}
-
-void RotationSystem::update(float dt) {
-    if (!ecs) {
-        std::cerr << "RotationSystem: ECS pointer is null!" << std::endl;
-        return;
-    }
-
-    for (EntityID entity : entities) {
-        auto* transform = ecs->getComponent<Transform>(entity);
-        auto* velocity = ecs->getComponent<Velocity>(entity);
-
-        if (transform && velocity) {
-            transform->position += velocity->linear * dt;
-            transform->rotation += velocity->angular * dt;
-        }
-    }
-}
+// Entity data
+struct Entity {
+    glm::vec3 position;
+    glm::vec3 rotation;
+    glm::vec3 angularVel;
+    glm::vec4 color;
+};
 
 int main() {
+    // Force X11 on Wayland to avoid Hyprland window sizing issues
+    setenv("GDK_BACKEND", "x11", 0);
+    setenv("SDL_VIDEODRIVER", "x11", 0);
+    // Try XWayland first - more stable window sizing
+    if (getenv("WAYLAND_DISPLAY")) {
+        std::cout << "Wayland detected, using XWayland for stable window size" << std::endl;
+    }
+    
     setenv("GLYCIN_USE_SANDBOX", "0", 1);
-    setenv("GTK_DISABLE_VALIDATION", "1", 1);
-
-    std::cout << "=== Zero Engine v0.6 - FIXED ===" << std::endl;
-    std::cout << "Bug Fix: Removed command buffer reuse that caused smearing" << std::endl;
-    std::cout << "Optimizations: Double buffering, batch texture loading" << std::endl;
-    std::cout << std::endl;
+    
+    std::cout << "=== Zero Engine v0.7 - OPTIMIZED ===" << std::endl;
+    std::cout << "Instanced rendering | Frustum culling | D16 depth" << std::endl << std::endl;
 
     Config config;
-    if (!config.load("config.ini")) {
-        std::cout << "! Using default configuration" << std::endl;
-    } else {
-        std::cout << "✓ Configuration loaded" << std::endl;
-    }
-
+    config.load("config.ini");
+    
     uint32_t width = config.get("window_width", 960);
     uint32_t height = config.get("window_height", 540);
-    std::string title = config.getString("window_title", "Zero Engine - FIXED");
+    std::string title = config.getString("window_title", "Zero Engine - OPTIMIZED");
 
     VulkanRenderer renderer;
     if (!renderer.init(width, height, title.c_str())) {
-        std::cerr << "Failed to initialize renderer!" << std::endl;
+        std::cerr << "Renderer init failed!" << std::endl;
         return -1;
     }
-    std::cout << "✓ Renderer initialized (double buffered)" << std::endl;
 
     Time::init();
-    std::cout << "✓ Time system initialized" << std::endl;
-
     Input::init(renderer.getWindow());
-    std::cout << "✓ Input system initialized" << std::endl;
 
-    GLBPipeline glbPipeline;
-    std::cout << "Loading GLB shaders..." << std::endl;
-    if (!glbPipeline.init(renderer.getDevice(), renderer.getRenderPass(),
-                         "shaders/vert_glb.spv", "shaders/frag_glb.spv")) {
-        std::cerr << "Failed to create GLB pipeline!" << std::endl;
+    InstancedPipeline pipeline;
+    if (!pipeline.init(renderer.getDevice(), renderer.getRenderPass(),
+                      "shaders/instanced_vert.spv", "shaders/instanced_frag.spv")) {
+        std::cerr << "Pipeline init failed!" << std::endl;
         renderer.cleanup();
         return -1;
     }
-    std::cout << "✓ GLB graphics pipeline created" << std::endl;
 
-    std::string modelPath = ResourcePath::models(
-        config.getString("model_name", "tree.glb")
-    );
-    std::cout << "  Model path: " << modelPath << std::endl;
+    std::string modelPath = config.getString("model_path", "models/Duck.glb");
+    // Remove quotes if present
+    if (modelPath.front() == '"') modelPath = modelPath.substr(1, modelPath.size() - 2);
     
-    auto loadStart = std::chrono::high_resolution_clock::now();
-    
-    GLBModel treeModel;
-    if (!treeModel.load(modelPath, renderer.getAllocator(),
-                        renderer.getDevice(), renderer.getCommandPool(),
-                        renderer.getGraphicsQueue(),
-                        glbPipeline.getDescriptorSetLayout())) {
-        std::cerr << "Failed to load GLB model!" << std::endl;
-        glbPipeline.cleanup();
+    GLBModelOpt model;
+    if (!model.load(modelPath, renderer.getAllocator(), renderer.getDevice(),
+                    renderer.getCommandPool(), renderer.getGraphicsQueue(),
+                    pipeline.getDescriptorSetLayout())) {
+        std::cerr << "Model load failed!" << std::endl;
+        pipeline.cleanup();
         renderer.cleanup();
         return -1;
     }
-    
-    auto loadEnd = std::chrono::high_resolution_clock::now();
-    auto loadDuration = std::chrono::duration_cast<std::chrono::milliseconds>(loadEnd - loadStart);
-    std::cout << "✓ GLB model loaded in " << loadDuration.count() << "ms (optimized batch loading)" << std::endl;
 
     Camera camera;
     camera.position = config.getVec3("camera_position", glm::vec3(0, 2, 8));
@@ -261,139 +125,151 @@ int main() {
     cameraController.sprintMultiplier = config.get("camera_sprint_multiplier", 2.0f);
     cameraController.mouseSensitivity = config.get("camera_sensitivity", 0.15f);
 
-    std::cout << "✓ Camera system initialized" << std::endl;
-
-    ECS ecs;
-    ecs.registerComponent<Transform>();
-    ecs.registerComponent<Velocity>();
-    ecs.registerComponent<GLBComponent>();
-    std::cout << "✓ ECS initialized" << std::endl;
-
-    auto rotationSystem = ecs.registerSystem<RotationSystem>();
-    rotationSystem->ecs = &ecs;
-    ComponentMask rotationMask;
-    rotationMask.set(0);
-    rotationMask.set(1);
-    ecs.setSystemSignature<RotationSystem>(rotationMask);
-    std::cout << "✓ Rotation system registered" << std::endl;
-
-    auto renderSystem = ecs.registerSystem<GLBRenderSystem>();
-    renderSystem->ecs = &ecs;
-    renderSystem->renderer = &renderer;
-    renderSystem->camera = &camera;
-    renderSystem->pipeline = &glbPipeline;
-    renderSystem->width = width;
-    renderSystem->height = height;
-    renderSystem->lightDir = config.getVec3("light_direction", glm::vec3(1, -1, 1));
-    renderSystem->lightColor = config.getVec3("light_color", glm::vec3(1));
-    renderSystem->ambientStrength = config.get("ambient_strength", 0.5f);
-
-    ComponentMask renderMask;
-    renderMask.set(0);
-    renderMask.set(2);
-    ecs.setSystemSignature<GLBRenderSystem>(renderMask);
-    std::cout << "✓ Render system registered" << std::endl;
-
-    std::cout << "Creating entity grid..." << std::endl;
-    int gridSize = config.get("grid_size", 2);
-    float spacing = config.get("grid_spacing", 2.5f);
-
+    // Create entities
+    int gridSize = config.get("grid_size", 10);
+    float spacing = config.get("grid_spacing", 5.0f);
+    
+    std::vector<Entity> entities;
     for (int x = -gridSize; x <= gridSize; x++) {
         for (int z = -gridSize; z <= gridSize; z++) {
-            EntityID tree = ecs.createEntity();
-            float height = (x + z) * 0.2f;
-            
-            ecs.addComponent(tree,
-                Transform(glm::vec3(x * spacing, height, z * spacing),
-                         glm::vec3(0.0f), glm::vec3(1.0f)));
-            
-            ecs.addComponent(tree,
-                Velocity(glm::vec3(0.0f),
-                        glm::vec3(0.3f * x * 0.1f, 0.5f + z * 0.1f, 0.2f)));
-            
-            GLBComponent glbComp;
-            glbComp.model = &treeModel;
-            ecs.addComponent(tree, glbComp);
+            Entity e;
+            e.position = glm::vec3(x * spacing, (x + z) * 0.2f, z * spacing);
+            e.rotation = glm::vec3(0);
+            e.angularVel = glm::vec3(0.3f * x * 0.1f, 0.5f + z * 0.1f, 0.2f);
+            // Use white color to show actual texture colors
+            e.color = glm::vec4(1.0f, 1.0f, 1.0f, 1.0f);
+            entities.push_back(e);
         }
     }
+    
+    std::cout << "Created " << entities.size() << " entities" << std::endl;
 
-    int entityCount = (gridSize * 2 + 1) * (gridSize * 2 + 1);
-    std::cout << "✓ Created " << entityCount << " entities\n" << std::endl;
+    // Instance buffer
+    InstanceBuffer instanceBuffer;
+    if (!instanceBuffer.create(renderer.getAllocator(), entities.size())) {
+        std::cerr << "Instance buffer failed!" << std::endl;
+        return -1;
+    }
+
+    std::vector<InstanceData> instanceData(entities.size());
+    Frustum frustum;
+    
+    glm::vec3 lightDir = config.getVec3("light_direction", glm::vec3(1, -1, 1));
+    glm::vec3 lightColor = config.getVec3("light_color", glm::vec3(1));
+    float ambientStrength = config.get("ambient_strength", 0.5f);
 
     std::cout << "\n=== Controls ===" << std::endl;
-    std::cout << "  WASD       - Move camera" << std::endl;
-    std::cout << "  Space/Ctrl - Up/Down" << std::endl;
-    std::cout << "  Shift      - Sprint" << std::endl;
-    std::cout << "  Right Click - Toggle mouse look" << std::endl;
-    std::cout << "  Scroll     - Zoom" << std::endl;
-    std::cout << "  ESC        - Exit" << std::endl;
-    std::cout << "\n=== Performance Info ===" << std::endl;
-    std::cout << "  Entities: " << entityCount << std::endl;
-    std::cout << "  Optimizations: Double buffering, Batch texture loading" << std::endl;
-    std::cout << "  Bug Fix: Smearing issue FIXED" << std::endl;
-    std::cout << "\n=== Starting render loop ===" << std::endl;
-
-    int maxFPS = config.get("max_fps", 0);
-    float targetFrameTime = (maxFPS > 0) ? (1.0f / maxFPS) : 0.0f;
+    std::cout << "WASD - Move | Space/Ctrl - Up/Down | Shift - Sprint" << std::endl;
+    std::cout << "Right Click - Mouse look | Scroll - Zoom | ESC - Exit" << std::endl;
+    std::cout << "\n=== Running ===" << std::endl;
 
     int frameCount = 0;
-    float fpsTimer = 0.0f;
-    bool showFPS = config.get("show_fps", 1);
+    float fpsTimer = 0;
+    int visibleCount = 0;
 
     while (!renderer.shouldClose() && !Input::getKey(Key::Escape)) {
         Time::update();
         float dt = Time::getDeltaTime();
-
-        if (targetFrameTime > 0.0f) {
-            while (Time::getRealDeltaTime() < targetFrameTime) {
-                // Busy wait
-            }
-        }
-
+        
         Input::update();
         renderer.pollEvents();
-
         cameraController.update(dt, renderer.getWindow());
 
-        ecs.updateSystems(dt);
+        // Update entities
+        for (auto& e : entities) {
+            e.rotation += e.angularVel * dt;
+        }
 
-        if (showFPS) {
-            frameCount++;
-            fpsTimer += dt;
-            if (fpsTimer >= 1.0f) {
-                float avgFrameTime = (1000.0f / frameCount);
-                std::cout << "FPS: " << frameCount
-                          << " | Frame time: " << avgFrameTime << "ms"
-                          << " | Pos: (" << (int)camera.position.x << ", "
-                          << (int)camera.position.y << ", " << (int)camera.position.z
-                          << ")";
-                          
-                // Performance indicators
-                if (frameCount >= 60) {
-                    std::cout << " [EXCELLENT]";
-                } else if (frameCount >= 30) {
-                    std::cout << " [GOOD]";
-                } else {
-                    std::cout << " [NEEDS OPTIMIZATION]";
-                }
-                std::cout << std::endl;
-                
-                frameCount = 0;
-                fpsTimer = 0.0f;
-            }
+        // Update frustum
+        glm::mat4 viewProj = camera.getViewProjectionMatrix();
+        frustum.update(viewProj);
+
+        // Build visible instance list with frustum culling
+        visibleCount = 0;
+        for (size_t i = 0; i < entities.size(); i++) {
+            const auto& e = entities[i];
+            
+            // Frustum cull (assume radius 2 for trees)
+            if (!frustum.sphereInFrustum(e.position, 2.0f)) continue;
+            
+            // Build model matrix
+            glm::mat4 m = glm::translate(glm::mat4(1.0f), e.position);
+            m = glm::rotate(m, e.rotation.x, glm::vec3(1, 0, 0));
+            m = glm::rotate(m, e.rotation.y, glm::vec3(0, 1, 0));
+            m = glm::rotate(m, e.rotation.z, glm::vec3(0, 0, 1));
+            
+            instanceData[visibleCount].model = m;
+            instanceData[visibleCount].color = e.color;
+            visibleCount++;
+        }
+
+        // Upload instances
+        instanceBuffer.update(instanceData);
+
+        // Render
+        VkCommandBuffer cmd;
+        renderer.beginFrame(cmd);
+        
+        // Query actual window size (Hyprland may have resized it)
+        int fbWidth, fbHeight;
+        glfwGetFramebufferSize(renderer.getWindow(), &fbWidth, &fbHeight);
+        
+        VkViewport viewport{0, 0, (float)fbWidth, (float)fbHeight, 0, 1};
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        
+        VkRect2D scissor{{0, 0}, {(uint32_t)fbWidth, (uint32_t)fbHeight}};
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+        
+        // Update camera aspect ratio if window resized
+        if (fbWidth > 0 && fbHeight > 0) {
+            camera.aspectRatio = (float)fbWidth / (float)fbHeight;
+        }
+
+        pipeline.bind(cmd);
+        pipeline.bindDescriptorSet(cmd, model.descriptorSet);
+
+        PushConstantsInstanced pc{};
+        pc.viewProj = viewProj;
+        pc.lightDir = glm::normalize(lightDir);
+        pc.lightColor = lightColor;
+        pc.ambientStrength = ambientStrength;
+        pipeline.pushConstants(cmd, pc);
+
+        // Bind vertex buffer (binding 0)
+        VkBuffer vertexBuffers[] = {model.combinedVertexBuffer};
+        VkDeviceSize vertexOffsets[] = {0};
+        vkCmdBindVertexBuffers(cmd, 0, 1, vertexBuffers, vertexOffsets);
+        
+        // Bind instance buffer (binding 1)
+        VkBuffer instanceBuffers[] = {instanceBuffer.getBuffer()};
+        VkDeviceSize instanceOffsets[] = {0};
+        vkCmdBindVertexBuffers(cmd, 1, 1, instanceBuffers, instanceOffsets);
+        
+        // Bind index buffer and draw ALL visible instances in ONE call
+        vkCmdBindIndexBuffer(cmd, model.combinedIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, model.totalIndices, visibleCount, 0, 0, 0);
+
+        renderer.endFrame(cmd);
+
+        // FPS counter
+        frameCount++;
+        fpsTimer += dt;
+        if (fpsTimer >= 1.0f) {
+            std::cout << "FPS: " << frameCount 
+                      << " | Visible: " << visibleCount << "/" << entities.size()
+                      << " | Culled: " << (entities.size() - visibleCount) << std::endl;
+            frameCount = 0;
+            fpsTimer = 0;
         }
     }
 
-    std::cout << "\n=== Shutting down ===" << std::endl;
-
-    config.save("config.ini");
-
-    treeModel.cleanup();
-    glbPipeline.cleanup();
+    std::cout << "\nShutting down..." << std::endl;
+    
+    instanceBuffer.cleanup();
+    model.cleanup();
+    pipeline.cleanup();
     renderer.cleanup();
 
-    std::cout << "✓ Clean shutdown complete" << std::endl;
-    std::cout << "\nSmearing bug fixed! Models should render cleanly now." << std::endl;
-
+    std::cout << "Done!" << std::endl;
     return 0;
 }
