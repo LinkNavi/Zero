@@ -227,7 +227,7 @@ int main() {
     std::cout << "✓ GLB graphics pipeline created" << std::endl;
 
     std::string modelPath = ResourcePath::models(
-        config.getString("model_name", "Duck.glb")
+        config.getString("model_name", "tree.glb")
     );
     std::cout << "  Model path: " << modelPath << std::endl;
     
