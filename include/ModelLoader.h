@@ -17,7 +17,8 @@
 #include <iostream>
 #include <filesystem>
 
-struct Vertex {
+// Full vertex format with all data
+struct VertexFull {
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 texCoord;
@@ -25,6 +26,16 @@ struct Vertex {
     glm::ivec4 boneIds{-1};
     glm::vec4 boneWeights{0.0f};
 };
+
+// Simple vertex format for instanced rendering (matches shader)
+struct Vertex {
+    glm::vec3 position;
+    glm::vec3 normal;
+    glm::vec2 texCoord;
+};
+
+// Alias for internal use
+using VertexInternal = VertexFull;
 
 struct Texture {
     VkImage image = VK_NULL_HANDLE;
@@ -93,6 +104,13 @@ struct Model {
     VkBuffer indexBuffer = VK_NULL_HANDLE;
     VmaAllocation vertexAllocation = nullptr;
     VmaAllocation indexAllocation = nullptr;
+    
+    // Combined buffers for instanced rendering (points to same buffers)
+    VkBuffer combinedVertexBuffer = VK_NULL_HANDLE;
+    VkBuffer combinedIndexBuffer = VK_NULL_HANDLE;
+    VmaAllocation combinedVertexAllocation = nullptr;
+    VmaAllocation combinedIndexAllocation = nullptr;
+    uint32_t totalIndices = 0;
     
     VkDescriptorSet descriptorSet = VK_NULL_HANDLE;
     
@@ -168,6 +186,13 @@ public:
         createBuffers(model);
         createDescriptorSet(model);
         
+        // Set combined buffer pointers and total indices
+        model.combinedVertexBuffer = model.vertexBuffer;
+        model.combinedIndexBuffer = model.indexBuffer;
+        model.combinedVertexAllocation = model.vertexAllocation;
+        model.combinedIndexAllocation = model.indexAllocation;
+        model.totalIndices = static_cast<uint32_t>(model.indices.size());
+        
         std::cout << "Loaded: " << path << std::endl;
         std::cout << "  Vertices: " << model.vertices.size() << std::endl;
         std::cout << "  Indices: " << model.indices.size() << std::endl;
@@ -187,6 +212,10 @@ public:
         if (model.indexBuffer) {
             vmaDestroyBuffer(allocator, model.indexBuffer, model.indexAllocation);
         }
+        // Don't double-free combined buffers since they point to the same memory
+        model.combinedVertexBuffer = VK_NULL_HANDLE;
+        model.combinedIndexBuffer = VK_NULL_HANDLE;
+        
         for (auto& tex : model.textures) {
             if (tex.sampler) vkDestroySampler(device, tex.sampler, nullptr);
             if (tex.view) vkDestroyImageView(device, tex.view, nullptr);
@@ -346,9 +375,11 @@ private:
         VkBuffer stagingBuffer;
         VmaAllocation stagingAlloc;
         
-        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = imageSize;
         bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
@@ -360,7 +391,8 @@ private:
         memcpy(mapped, data, imageSize);
         vmaUnmapMemory(allocator, stagingAlloc);
         
-        VkImageCreateInfo imageInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        VkImageCreateInfo imageInfo{};
+        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
         imageInfo.extent = {(uint32_t)width, (uint32_t)height, 1};
         imageInfo.mipLevels = 1;
@@ -370,6 +402,7 @@ private:
         imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
         imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         
         VmaAllocationCreateInfo imgAllocInfo{};
         imgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
@@ -379,13 +412,18 @@ private:
         // Transition and copy
         VkCommandBuffer cmd = beginSingleTimeCommands();
         
-        VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        VkImageMemoryBarrier barrier{};
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
         barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
         barrier.image = texture.image;
-        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = 1;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
         barrier.srcAccessMask = 0;
         barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
         
@@ -393,7 +431,10 @@ private:
             0, 0, nullptr, 0, nullptr, 1, &barrier);
         
         VkBufferImageCopy region{};
-        region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = 0;
+        region.imageSubresource.baseArrayLayer = 0;
+        region.imageSubresource.layerCount = 1;
         region.imageExtent = {(uint32_t)width, (uint32_t)height, 1};
         
         vkCmdCopyBufferToImage(cmd, stagingBuffer, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
@@ -411,14 +452,20 @@ private:
         vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
         
         // Create view and sampler
-        VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        VkImageViewCreateInfo viewInfo{};
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = texture.image;
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
         viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-        viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
         vkCreateImageView(device, &viewInfo, nullptr, &texture.view);
         
-        VkSamplerCreateInfo samplerInfo{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        VkSamplerCreateInfo samplerInfo{};
+        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
         samplerInfo.magFilter = VK_FILTER_LINEAR;
         samplerInfo.minFilter = VK_FILTER_LINEAR;
         samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
@@ -444,16 +491,16 @@ private:
         }
     }
     
-    void processMesh(aiMesh* mesh, const aiScene* scene, Model& model, const glm::mat4& transform) {
+    void processMesh(aiMesh* mesh, const aiScene* /*scene*/, Model& model, const glm::mat4& transform) {
         SubMesh submesh;
         submesh.name = mesh->mName.C_Str();
         submesh.vertexOffset = (uint32_t)model.vertices.size();
         submesh.indexOffset = (uint32_t)model.indices.size();
         submesh.materialIndex = mesh->mMaterialIndex;
         
-        // Vertices
+        // Vertices - convert to simple format
         for (unsigned int i = 0; i < mesh->mNumVertices; i++) {
-            Vertex vertex;
+            Vertex vertex{};
             
             glm::vec4 pos = transform * glm::vec4(aiToGlm(mesh->mVertices[i]), 1.0f);
             vertex.position = glm::vec3(pos);
@@ -461,14 +508,14 @@ private:
             if (mesh->HasNormals()) {
                 glm::vec4 norm = transform * glm::vec4(aiToGlm(mesh->mNormals[i]), 0.0f);
                 vertex.normal = glm::normalize(glm::vec3(norm));
+            } else {
+                vertex.normal = glm::vec3(0, 1, 0);
             }
             
             if (mesh->HasTextureCoords(0)) {
                 vertex.texCoord = glm::vec2(mesh->mTextureCoords[0][i].x, mesh->mTextureCoords[0][i].y);
-            }
-            
-            if (mesh->HasVertexColors(0)) {
-                vertex.color = aiToGlm(mesh->mColors[0][i]);
+            } else {
+                vertex.texCoord = glm::vec2(0);
             }
             
             model.vertices.push_back(vertex);
@@ -484,45 +531,7 @@ private:
         
         submesh.indexCount = (uint32_t)model.indices.size() - submesh.indexOffset;
         
-        // Bones
-        if (mesh->HasBones()) {
-            loadBones(mesh, model, submesh.vertexOffset);
-        }
-        
         model.submeshes.push_back(submesh);
-    }
-    
-    void loadBones(aiMesh* mesh, Model& model, uint32_t vertexOffset) {
-        for (unsigned int i = 0; i < mesh->mNumBones; i++) {
-            aiBone* bone = mesh->mBones[i];
-            std::string boneName = bone->mName.C_Str();
-            
-            int boneIndex;
-            if (model.boneMap.find(boneName) == model.boneMap.end()) {
-                boneIndex = (int)model.bones.size();
-                BoneInfo boneInfo;
-                boneInfo.name = boneName;
-                boneInfo.offset = aiToGlm(bone->mOffsetMatrix);
-                model.bones.push_back(boneInfo);
-                model.boneMap[boneName] = boneIndex;
-            } else {
-                boneIndex = model.boneMap[boneName];
-            }
-            
-            for (unsigned int j = 0; j < bone->mNumWeights; j++) {
-                uint32_t vertexId = vertexOffset + bone->mWeights[j].mVertexId;
-                float weight = bone->mWeights[j].mWeight;
-                
-                Vertex& v = model.vertices[vertexId];
-                for (int k = 0; k < 4; k++) {
-                    if (v.boneWeights[k] == 0.0f) {
-                        v.boneIds[k] = boneIndex;
-                        v.boneWeights[k] = weight;
-                        break;
-                    }
-                }
-            }
-        }
     }
     
     void loadAnimations(const aiScene* scene, Model& model) {
@@ -566,9 +575,11 @@ private:
         VkBuffer stagingVB;
         VmaAllocation stagingVBAlloc;
         
-        VkBufferCreateInfo bufferInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        VkBufferCreateInfo bufferInfo{};
+        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
         bufferInfo.size = vbSize;
         bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
@@ -618,7 +629,8 @@ private:
     }
     
     void createDescriptorSet(Model& model) {
-        VkDescriptorSetAllocateInfo allocInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        VkDescriptorSetAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
         allocInfo.descriptorPool = descriptorPool;
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &descriptorSetLayout;
@@ -631,7 +643,8 @@ private:
         imageInfo.imageView = albedo->view;
         imageInfo.sampler = albedo->sampler;
         
-        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        VkWriteDescriptorSet write{};
+        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         write.dstSet = model.descriptorSet;
         write.dstBinding = 0;
         write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
@@ -650,7 +663,8 @@ private:
     }
     
     VkCommandBuffer beginSingleTimeCommands() {
-        VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        VkCommandBufferAllocateInfo allocInfo{};
+        allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandPool = commandPool;
         allocInfo.commandBufferCount = 1;
@@ -658,7 +672,8 @@ private:
         VkCommandBuffer cmd;
         vkAllocateCommandBuffers(device, &allocInfo, &cmd);
         
-        VkCommandBufferBeginInfo beginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        VkCommandBufferBeginInfo beginInfo{};
+        beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(cmd, &beginInfo);
         
@@ -668,7 +683,8 @@ private:
     void endSingleTimeCommands(VkCommandBuffer cmd) {
         vkEndCommandBuffer(cmd);
         
-        VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        VkSubmitInfo submitInfo{};
+        submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &cmd;
         

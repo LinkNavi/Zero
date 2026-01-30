@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+# set -e
 
 shopt -s nullglob
 RED='\033[0;31m'
@@ -64,48 +64,61 @@ install_deps() {
     esac
 }
 
-# Compile shaders
+
+
 compile_shaders() {
     local shader_dir="shaders"
-    local count=0
+    local compiled=0
     local failed=0
-    
-    if [ ! -d "$shader_dir" ]; then
+    local found=0
+
+    [ -d "$shader_dir" ] || {
         warn "No shaders directory found"
-        return
-    fi
-    
-    command -v glslc &>/dev/null || error "glslc not found. Run: $0 --deps"
-    
+        return 0
+    }
+
+    command -v glslc &>/dev/null || error "glslc not found. Run: $0 deps"
+
     info "Compiling shaders..."
-    
-   for shader in "$shader_dir"/*.{vert,frag,comp,geom}; do
-    [ -f "$shader" ] || continue
-        
-        local name=$(basename "$shader")
-        local base="${name%.*}"
-        local ext="${name##*.}"
-        local output="$shader_dir/${base}_${ext}.spv"
-        
-        if glslc "$shader" -o "$output" 2>/dev/null; then
-            ((count++))
-        else
-            warn "Failed: $name"
-            ((failed++))
-        fi
+
+    for ext in vert frag comp geom; do
+        for shader in "$shader_dir"/*."$ext"; do
+            [ -f "$shader" ] || continue
+
+            found=$((found + 1))
+
+            local name
+            name=$(basename "$shader")
+            local output="$shader_dir/${name%.*}_${ext}.spv"
+
+            info " → $name"
+
+            if glslc "$shader" -o "$output"; then
+                compiled=$((compiled + 1))
+            else
+                warn "Failed to compile: $name"
+                failed=$((failed + 1))
+            fi
+        done
     done
-    
-    info "Shaders: $count compiled, $failed failed"
+
+    if [ "$found" -eq 0 ]; then
+        warn "No shaders found"
+        return 0
+    fi
+
+    info "Shaders: $compiled compiled, $failed failed"
 }
+
 
 # Build project
 build_project() {
     local mode="${1:-dev}"
-    
+      info "Doing Shaders"
     compile_shaders
     
     info "Building ($mode)..."
-    
+
     if command -v zora &>/dev/null; then
         zora build
     elif [ -f CMakeLists.txt ]; then

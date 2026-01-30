@@ -5,7 +5,7 @@
 
 enum class Key {
     W, A, S, D,
-    Q, E,
+    Q, E, J,
     Space, Shift, Ctrl,
     Up, Down, Left, Right,
     Escape,
@@ -36,6 +36,7 @@ public:
         keys[Key::D] = false;
         keys[Key::Q] = false;
         keys[Key::E] = false;
+        keys[Key::J] = false;
         keys[Key::Space] = false;
         keys[Key::Shift] = false;
         keys[Key::Ctrl] = false;
@@ -95,6 +96,7 @@ private:
             case GLFW_KEY_D: keys[Key::D] = pressed; break;
             case GLFW_KEY_Q: keys[Key::Q] = pressed; break;
             case GLFW_KEY_E: keys[Key::E] = pressed; break;
+            case GLFW_KEY_J: keys[Key::J] = pressed; break;
             case GLFW_KEY_SPACE: keys[Key::Space] = pressed; break;
             case GLFW_KEY_LEFT_SHIFT: keys[Key::Shift] = pressed; break;
             case GLFW_KEY_LEFT_CONTROL: keys[Key::Ctrl] = pressed; break;
