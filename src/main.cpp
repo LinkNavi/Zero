@@ -22,6 +22,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <iostream>
 #include <cstdlib>
+#include <cmath>
 
 // Simple frustum for culling
 struct Frustum {
@@ -98,7 +99,7 @@ int main() {
         return -1;
     }
 
-    std::string modelPath = config.getString("model_path", "models/Duck.glb");
+    std::string modelPath = config.getString("model_path", "models/tree.glb");
     // Remove quotes if present
     if (modelPath.front() == '"') modelPath = modelPath.substr(1, modelPath.size() - 2);
     
@@ -189,16 +190,36 @@ int main() {
         for (size_t i = 0; i < entities.size(); i++) {
             const auto& e = entities[i];
             
-            // Frustum cull (assume radius 2 for trees)
+            // Frustum cull (assume radius 2 for ducks)
             if (!frustum.sphereInFrustum(e.position, 2.0f)) continue;
             
-            // Build model matrix
-            glm::mat4 m = glm::translate(glm::mat4(1.0f), e.position);
-            m = glm::rotate(m, e.rotation.x, glm::vec3(1, 0, 0));
-            m = glm::rotate(m, e.rotation.y, glm::vec3(0, 1, 0));
-            m = glm::rotate(m, e.rotation.z, glm::vec3(0, 0, 1));
+            // Build model matrix - optimized: combine rotation into single matrix
+            float cx = cosf(e.rotation.x), sx = sinf(e.rotation.x);
+            float cy = cosf(e.rotation.y), sy = sinf(e.rotation.y);
+            float cz = cosf(e.rotation.z), sz = sinf(e.rotation.z);
             
-            instanceData[visibleCount].model = m;
+            // Combined rotation matrix (ZYX order) with translation
+            glm::mat4& m = instanceData[visibleCount].model;
+            m[0][0] = cy * cz;
+            m[0][1] = cy * sz;
+            m[0][2] = -sy;
+            m[0][3] = 0.0f;
+            
+            m[1][0] = sx * sy * cz - cx * sz;
+            m[1][1] = sx * sy * sz + cx * cz;
+            m[1][2] = sx * cy;
+            m[1][3] = 0.0f;
+            
+            m[2][0] = cx * sy * cz + sx * sz;
+            m[2][1] = cx * sy * sz - sx * cz;
+            m[2][2] = cx * cy;
+            m[2][3] = 0.0f;
+            
+            m[3][0] = e.position.x;
+            m[3][1] = e.position.y;
+            m[3][2] = e.position.z;
+            m[3][3] = 1.0f;
+            
             instanceData[visibleCount].color = e.color;
             visibleCount++;
         }

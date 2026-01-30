@@ -23,20 +23,15 @@ layout(push_constant) uniform PushConstants {
 layout(location = 0) out vec3 fragNormal;
 layout(location = 1) out vec2 fragTexCoord;
 layout(location = 2) out vec4 fragColor;
-layout(location = 3) out vec3 fragWorldPos;
 
 void main() {
     // Reconstruct model matrix from columns
     mat4 model = mat4(inModelCol0, inModelCol1, inModelCol2, inModelCol3);
     
-    vec4 worldPos = model * vec4(inPosition, 1.0);
-    gl_Position = pc.viewProj * worldPos;
+    gl_Position = pc.viewProj * model * vec4(inPosition, 1.0);
     
-    // Transform normal (simplified - assumes uniform scale)
-    mat3 normalMatrix = mat3(model);
-    fragNormal = normalize(normalMatrix * inNormal);
-    
+    // Transform normal (simplified - assumes uniform scale, skip normalize)
+    fragNormal = mat3(model) * inNormal;
     fragTexCoord = inTexCoord;
     fragColor = inColor;
-    fragWorldPos = worldPos.xyz;
 }

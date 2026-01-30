@@ -349,7 +349,10 @@ private:
         vkb::SwapchainBuilder swapchainBuilder{vkbDevice};
         auto swapRet = swapchainBuilder
             .set_desired_format({VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR})
-            .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
+            // IMMEDIATE = no vsync, maximum FPS for benchmarking
+            .set_desired_present_mode(VK_PRESENT_MODE_IMMEDIATE_KHR)
+            .add_fallback_present_mode(VK_PRESENT_MODE_MAILBOX_KHR)
+            .add_fallback_present_mode(VK_PRESENT_MODE_FIFO_KHR)
             .set_desired_extent(width, height)
             .set_desired_min_image_count(2)
             .build();
