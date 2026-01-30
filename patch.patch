@@ -1,0 +1,64 @@
+--- a/include/Renderer.h
++++ b/include/Renderer.h
+@@ -38,6 +38,7 @@ class VulkanRenderer {
+     uint32_t width, height;
+     uint32_t currentFrame = 0;
+     uint32_t imageIndex = 0;
++    bool framebufferResized = false;
+ 
+ public:
+     bool init(uint32_t w, uint32_t h, const char* title) {
+@@ -58,8 +59,14 @@ public:
+             return false;
+         }
+         
++        // Fix for Hyprland: Disable resizing to prevent compositor interference
+         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+-        glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
++        glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);  // Enable but we'll constrain it
++        
++        // Force window size constraints
++        glfwWindowHint(GLFW_FLOATING, GLFW_TRUE);
++        glfwWindowHint(GLFW_DECORATED, GLFW_TRUE);
++        
+         window = glfwCreateWindow(width, height, title, nullptr, nullptr);
+         
+         if (!window) {
+@@ -68,6 +75,15 @@ public:
+             return false;
+         }
+         std::cout << "  ✓ GLFW window created" << std::endl;
++        
++        // Set fixed window size limits to prevent Hyprland from resizing
++        glfwSetWindowSizeLimits(window, width, height, width, height);
++        
++        // Wayland-specific: explicitly set the window size again
++        glfwSetWindowSize(window, width, height);
++        
++        // Store pointer for callbacks
++        glfwSetWindowUserPointer(window, this);
+         
+         uint32_t glfwExtensionCount = 0;
+         const char** glfwExtensions = glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+@@ -139,6 +155,21 @@ public:
+         std::cout << "  ✓ Queues acquired" << std::endl;
+         
+         std::cout << "  - Initializing VMA allocator..." << std::endl;
++        
++        // Query actual surface capabilities to prevent size mismatch
++        VkSurfaceCapabilitiesKHR surfaceCaps;
++        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physicalDevice, surface, &surfaceCaps);
++        
++        // Clamp to supported range
++        if (surfaceCaps.currentExtent.width != 0xFFFFFFFF) {
++            width = surfaceCaps.currentExtent.width;
++            height = surfaceCaps.currentExtent.height;
++            std::cout << "  ! Surface extent override: " << width << "x" << height << std::endl;
++        }
++        
++        // Update window size to match
++        glfwSetWindowSize(window, width, height);
++        
+         VmaAllocatorCreateInfo allocatorInfo = {};
+         allocatorInfo.physicalDevice = physicalDevice;
+         allocatorInfo.device = device;
