@@ -3,18 +3,7 @@
 #include <glm/glm.hpp>
 #include <vector>
 
-// Forward declare Transform - needs to be defined where PhysicsSystem is used
-struct Transform : Component {
-    glm::vec3 position;
-    glm::vec3 rotation;
-    glm::vec3 scale;
-    
-    Transform() : position(0.0f), rotation(0.0f), scale(1.0f) {}
-    Transform(glm::vec3 p, glm::vec3 r, glm::vec3 s) 
-        : position(p), rotation(r), scale(s) {}
-    
-    glm::mat4 getMatrix() const;
-};
+
 
 struct PhysicsConfig {
     glm::vec3 gravity = glm::vec3(0, -9.8f, 0);
