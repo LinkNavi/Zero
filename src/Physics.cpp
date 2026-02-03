@@ -26,7 +26,7 @@ void PhysicsSystem::update(float dt) {
         
         // Integration
         transform->position += rb->velocity * dt;
-        transform->rotation += rb->angularVelocity * dt;
+        // transform->rotation += rb->angularVelocity * dt;
     }
     
     // Collision detection and resolution
