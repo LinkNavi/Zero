@@ -39,6 +39,9 @@ public:
     static std::string scenes(const std::string& name) {
     return "scenes/" + name;
 }
+static std::string textures(const std::string& name) {
+    return "textures/" + name;
+}
     static std::string models(const std::string& filename) {
         return get("models/" + filename);
     }

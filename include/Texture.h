@@ -1,12 +1,17 @@
+// include/Texture.h
 #pragma once
 #include <vulkan/vulkan.h>
 #include <vk_mem_alloc.h>
 #include <string>
 #include <iostream>
 
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
+// Forward declare stbi functions instead of including stb_image.h
+extern "C" {
+    unsigned char* stbi_load(const char* filename, int* x, int* y, int* channels_in_file, int desired_channels);
+    void stbi_image_free(void* retval_from_stbi_load);
+}
 
+#define STBI_rgb_alpha 4
 #ifndef TEXTURE_STRUCT_DEFINED
 #define TEXTURE_STRUCT_DEFINED
 struct Texture {

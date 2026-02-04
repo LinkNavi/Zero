@@ -1,5 +1,9 @@
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
+
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
+
 
 #include "Renderer.h"
 #include "ModelLoader.h"
@@ -14,7 +18,9 @@
 #include "ResourcePath.h"
 #include "SceneManager.h"
 #include "Pipeline.h"
+#include "Skybox.h"
 
+Skybox skybox;
 #include <chrono>
 #include <iostream>
 
@@ -253,7 +259,29 @@ int main() {
                      renderer.getCommandPool(), renderer.getGraphicsQueue(),
                      g_descriptorPool, pipeline.getDescriptorLayout());
     g_modelLoader = &modelLoader;
+// Model loader
 
+
+
+
+
+
+// Skybox
+std::vector<std::string> skyboxFaces = {
+    ResourcePath::textures("skybox/right.jpg"),   // +X
+    ResourcePath::textures("skybox/left.jpg"),    // -X
+    ResourcePath::textures("skybox/top.jpg"),     // +Y
+    ResourcePath::textures("skybox/bottom.jpg"),  // -Y
+    ResourcePath::textures("skybox/front.jpg"),   // +Z
+    ResourcePath::textures("skybox/back.jpg")     // -Z
+};
+if (!skybox.init(renderer.getDevice(), renderer.getAllocator(), g_descriptorPool,
+                 renderer.getRenderPass(), renderer.getCommandPool(), renderer.getGraphicsQueue(),
+                 ResourcePath::shaders("skybox_vert.spv"),
+                 ResourcePath::shaders("skybox_frag.spv"),
+                 skyboxFaces)) {
+    std::cerr << "Failed to init skybox\n";
+}
     // Scenes
     SceneManager sceneManager;
     DuckScene duckScene;
@@ -346,7 +374,7 @@ int main() {
         } else if (auto* walk = dynamic_cast<WalkingScene*>(sceneManager.getCurrentScene())) {
             walk->render(cmd);
         }
-
+skybox.render(cmd, camera.getViewMatrix(), camera.getProjectionMatrix());
         // UI
         if (showUI) {
             renderer.imguiNewFrame();
@@ -416,6 +444,6 @@ int main() {
     vkDestroyDescriptorPool(renderer.getDevice(), g_descriptorPool, nullptr);
     renderer.imguiCleanup();
     renderer.cleanup();
-
+skybox.cleanup();
     return 0;
 }
