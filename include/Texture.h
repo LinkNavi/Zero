@@ -7,6 +7,9 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
+// Only define Texture if not already defined (e.g., in ModelLoader.h)
+#ifndef TEXTURE_STRUCT_DEFINED
+#define TEXTURE_STRUCT_DEFINED
 struct Texture {
     VkImage image = VK_NULL_HANDLE;
     VkImageView imageView = VK_NULL_HANDLE;
@@ -16,6 +19,7 @@ struct Texture {
     uint32_t height = 0;
     uint32_t mipLevels = 1;
 };
+#endif
 
 class TextureLoader {
     VkDevice device;

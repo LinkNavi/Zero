@@ -4,13 +4,8 @@
 #include <string>
 #include <iostream>
 #include "ModelLoader.h"
-
-// Forward declarations
-struct Texture;
-struct Sound;
-class ModelLoader;
-class TextureLoader;
-class AudioSystem;
+#include "Texture.h"
+#include "AudioSystem.h"
 
 // Asset handle with reference counting
 template<typename T>

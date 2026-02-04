@@ -16,7 +16,7 @@
 #include <unordered_map>
 #include <iostream>
 #include <filesystem>
-
+#include "Texture.h"
 // Full vertex format with all data
 struct VertexFull {
     glm::vec3 position;
@@ -37,14 +37,7 @@ struct Vertex {
 // Alias for internal use
 using VertexInternal = VertexFull;
 
-struct Texture {
-    VkImage image = VK_NULL_HANDLE;
-    VkImageView view = VK_NULL_HANDLE;
-    VkSampler sampler = VK_NULL_HANDLE;
-    VmaAllocation allocation = nullptr;
-    uint32_t width = 0, height = 0;
-    std::string path;
-};
+
 
 struct SubMesh {
     uint32_t indexOffset = 0;
