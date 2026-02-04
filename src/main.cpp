@@ -12,7 +12,7 @@
 #include "PhysicsSystem.h"
 #include <iostream>
 #include <thread>
-
+#include "ScenePackager.h"
 // Example game where we use all systems together
 
 int main() {
@@ -186,11 +186,20 @@ int main() {
     EntityID spawned = enemyPrefab.instantiate(&ecs, glm::vec3(10, 0, 0));
     std::cout << "Spawned enemy from prefab (ID: " << spawned << ")" << std::endl;
     
-    // === 9. Scene Serialization ===
-    std::cout << "\n=== Scene Serialization ===" << std::endl;
-    
-    // Save current scene
-    EntitySerializer::saveScene(&ecs, "scenes/test_scene.json");
+  // === 9. Scene Serialization ===
+std::cout << "\n=== Scene Serialization ===" << std::endl;
+
+// Create directories if they don't exist
+std::filesystem::create_directories("scenes");
+std::filesystem::create_directories("prefabs");
+
+// Save current scene using ScenePackage
+ScenePackaging::ScenePackager::saveScene(&ecs, "scenes/test_scene.zscene", "TestScene");
+
+// You can also save the prefab with the package
+ScenePackage::PackageWriter prefabWriter;
+prefabWriter.setSceneData(enemyPrefab.data.dump());
+prefabWriter.write("prefabs/basic_enemy.zscene");
     
     // === 10. Event Emission ===
     std::cout << "\n=== Event System ===" << std::endl;
