@@ -10,7 +10,7 @@
 #include "tags.h"
 #include "Config.h"
 #include "ResourcePath.h"
-
+#include "NuklearGUI.h"
 
 #include <iostream>
 
@@ -35,6 +35,7 @@ public:
     }
     
     void update(float dt) override {
+        (void)dt;
         std::vector<InstanceData> instances;
         
         for (EntityID entity : entities) {
@@ -85,26 +86,22 @@ int main() {
     Config config;
     config.load(ResourcePath::config("config.ini"));
     
-    // Init renderer
     VulkanRenderer renderer;
-    if (!renderer.init(1920, 1080, "Engine with ImGui")) {
+    if (!renderer.init(1920, 1080, "Zero Engine")) {
         std::cerr << "Failed to init renderer\n";
         return -1;
     }
     
     std::cout << "✓ Renderer initialized\n";
     
-    // Init input & time
     Input::init(renderer.getWindow());
     Time::init();
     
-    // Camera
     Camera camera;
     camera.position = glm::vec3(0, 5, 15);
     camera.aspectRatio = 1920.0f / 1080.0f;
     CameraController camController(&camera, config);
     
-    // Create descriptor pool
     VkDescriptorPoolSize poolSize{};
     poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     poolSize.descriptorCount = 100;
@@ -119,7 +116,6 @@ int main() {
     VkDescriptorPool descriptorPool;
     vkCreateDescriptorPool(renderer.getDevice(), &poolInfo, nullptr, &descriptorPool);
     
-    // Create descriptor set layout
     VkDescriptorSetLayoutBinding samplerBinding{};
     samplerBinding.binding = 0;
     samplerBinding.descriptorCount = 1;
@@ -134,13 +130,11 @@ int main() {
     VkDescriptorSetLayout descriptorSetLayout;
     vkCreateDescriptorSetLayout(renderer.getDevice(), &layoutInfo, nullptr, &descriptorSetLayout);
     
-    // Pipeline
     InstancedPipeline pipeline;
     pipeline.init(renderer.getDevice(), renderer.getRenderPass(),
                  ResourcePath::shaders("instanced_vert.spv"),
                  ResourcePath::shaders("instanced_frag.spv"));
     
-    // Load model
     ModelLoader modelLoader;
     modelLoader.init(renderer.getDevice(), renderer.getAllocator(),
                     renderer.getCommandPool(), renderer.getGraphicsQueue(),
@@ -148,16 +142,12 @@ int main() {
     
     Model cube = modelLoader.load(ResourcePath::models("Duck.glb"));
     
-      
-    // ECS setup
     ECS ecs;
     g_ecs = &ecs;
     
     ecs.registerComponent<Transform>();
     ecs.registerComponent<Tag>();
     ecs.registerComponent<Layer>();
-
-
     
     auto renderSystem = ecs.registerSystem<RenderSystem>();
     ComponentMask renderMask;
@@ -166,7 +156,11 @@ int main() {
     
     renderSystem->init(&renderer, &pipeline, &cube, &camera);
     
-    // Spawn entities
+    NuklearGUI gui;
+    gui.init(renderer.getDevice(), renderer.getAllocator(), renderer.getRenderPass(),
+             renderer.getWindow(), renderer.getWidth(), renderer.getHeight(),
+             renderer.getCommandPool(), renderer.getGraphicsQueue());
+    
     const int gridSize = 5;
     const float spacing = 3.0f;
     uint32_t entityCount = 0;
@@ -190,12 +184,11 @@ int main() {
     std::cout << "✓ Spawned " << entityCount << " entities\n";
     std::cout << "\nControls:\n";
     std::cout << "  WASD + Mouse2 - Move camera\n";
-    std::cout << "  F1 - Toggle UI\n";
+    std::cout << "  J - Toggle UI\n";
     std::cout << "  ESC - Exit\n\n";
     
     bool showUI = true;
     
-    // Main loop
     while (!renderer.shouldClose()) {
         renderer.pollEvents();
         
@@ -205,21 +198,35 @@ int main() {
         Time::update();
         float dt = Time::getDeltaTime();
         
-        // Update camera
+        gui.newFrame();
+        
+        if (showUI && nk_begin(gui.getContext(), "Stats", nk_rect(10, 10, 250, 200),
+            NK_WINDOW_BORDER|NK_WINDOW_MOVABLE|NK_WINDOW_SCALABLE|NK_WINDOW_TITLE))
+        {
+            nk_layout_row_dynamic(gui.getContext(), 25, 1);
+            nk_labelf(gui.getContext(), NK_TEXT_LEFT, "FPS: %.1f", Time::getFPS());
+            nk_labelf(gui.getContext(), NK_TEXT_LEFT, "Frame: %.2fms", Time::getDeltaTime() * 1000);
+            nk_labelf(gui.getContext(), NK_TEXT_LEFT, "Entities: %d", entityCount);
+            nk_labelf(gui.getContext(), NK_TEXT_LEFT, "Draw Calls: %d", renderSystem->draw_calls);
+            
+            nk_layout_row_dynamic(gui.getContext(), 25, 2);
+            if (nk_button_label(gui.getContext(), "Toggle Vsync")) {
+                // TODO
+            }
+            nk_end(gui.getContext());
+        }
+        
         camController.update(dt, renderer.getWindow());
         
-        // Rotate entities
-        for (size_t i = 0; i < 1000; i++) {
+        for (uint32_t i = 0; i < entityCount; i++) {
             auto* transform = ecs.getComponent<Transform>(i);
             if (transform) {
                 transform->rotate(glm::vec3(0, dt * 30.0f, 0));
             }
         }
         
-        // Update systems
         renderSystem->update(dt);
         
-    
         VkCommandBuffer cmd;
         renderer.beginFrame(cmd);
         
@@ -235,19 +242,16 @@ int main() {
         vkCmdSetScissor(cmd, 0, 1, &scissor);
         
         renderSystem->render(cmd);
-        
-        // Render ImGui
-
+        gui.render(cmd);
         
         renderer.endFrame(cmd);
         Input::update();
     }
     
-    // Cleanup
     std::cout << "\nCleaning up...\n";
     vkDeviceWaitIdle(renderer.getDevice());
     
-
+    gui.cleanup();
     renderSystem->instanceBuffer.cleanup();
     modelLoader.cleanup(cube);
     modelLoader.cleanupLoader();
