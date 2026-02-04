@@ -204,8 +204,8 @@ int main() {
     events.emit(collision);
     
     // Emit custom event
-    Event scoreEvent = EVENT_CUSTOM("PlayerScored");
-    scoreEvent.setInt("score", 100);
+  Event scoreEvent{EventType::Custom, 0, "PlayerScored", {}};
+	scoreEvent.setInt("score", 100);
     events.emit(scoreEvent);
     
     // Queue events for later

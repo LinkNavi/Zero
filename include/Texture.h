@@ -7,20 +7,19 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-// Only define Texture if not already defined (e.g., in ModelLoader.h)
 #ifndef TEXTURE_STRUCT_DEFINED
 #define TEXTURE_STRUCT_DEFINED
 struct Texture {
     VkImage image = VK_NULL_HANDLE;
-    VkImageView imageView = VK_NULL_HANDLE;
+    VkImageView view = VK_NULL_HANDLE;  // ADD THIS
     VkSampler sampler = VK_NULL_HANDLE;
     VmaAllocation allocation;
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t mipLevels = 1;
+    std::string path;  // ADD THIS
 };
 #endif
-
 class TextureLoader {
     VkDevice device;
     VmaAllocator allocator;
@@ -122,17 +121,17 @@ public:
         return true;
     }
     
-    void destroyTexture(Texture& texture) {
-        if (texture.sampler != VK_NULL_HANDLE) {
-            vkDestroySampler(device, texture.sampler, nullptr);
-        }
-        if (texture.imageView != VK_NULL_HANDLE) {
-            vkDestroyImageView(device, texture.imageView, nullptr);
-        }
-        if (texture.image != VK_NULL_HANDLE) {
-            vmaDestroyImage(allocator, texture.image, texture.allocation);
-        }
+  void destroyTexture(Texture& texture) {
+    if (texture.sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(device, texture.sampler, nullptr);
     }
+    if (texture.view != VK_NULL_HANDLE) {  // Changed from imageView
+        vkDestroyImageView(device, texture.view, nullptr);
+    }
+    if (texture.image != VK_NULL_HANDLE) {
+        vmaDestroyImage(allocator, texture.image, texture.allocation);
+    }
+}
     
 private:
     bool createImageView(Texture& texture) {
@@ -147,8 +146,8 @@ private:
         viewInfo.subresourceRange.baseArrayLayer = 0;
         viewInfo.subresourceRange.layerCount = 1;
         
-        return vkCreateImageView(device, &viewInfo, nullptr, &texture.imageView) == VK_SUCCESS;
-    }
+       return vkCreateImageView(device, &viewInfo, nullptr, &texture.view) == VK_SUCCESS;
+	}
     
     bool createSampler(Texture& texture) {
         VkSamplerCreateInfo samplerInfo{};

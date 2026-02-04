@@ -56,8 +56,7 @@ public:
         ComponentMetadata metadata(name, typeIndex, factory, deleter, sizeof(T));
         
         typeToMetadata.emplace(typeIndex, metadata);
-        nameToType[name] = typeIndex;
-        typeToID[typeIndex] = nextID++;
+        nameToType.insert_or_assign(name, typeIndex);        typeToID[typeIndex] = nextID++;
         
         std::cout << "Registered component: " << name 
                   << " (size: " << sizeof(T) << " bytes, ID: " 
