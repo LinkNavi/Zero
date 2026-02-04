@@ -10,9 +10,9 @@
 #include "tags.h"
 #include "Config.h"
 #include "ResourcePath.h"
-#include "NuklearGUI.h"
 
 #include <iostream>
+#include <chrono>
 
 ECS* g_ecs = nullptr;
 
@@ -31,7 +31,7 @@ public:
         pipeline = pipe;
         model = mdl;
         camera = cam;
-        instanceBuffer.create(renderer->getAllocator(), 10000);
+        instanceBuffer.create(renderer->getAllocator(), 100000);
     }
     
     void update(float dt) override {
@@ -81,6 +81,30 @@ public:
     }
 };
 
+void spawnDucks(ECS& ecs, int gridSize, float spacing) {
+    ecs.clear();
+    
+    float offset = (gridSize - 1) * spacing * 0.5f;
+    
+    for (int x = 0; x < gridSize; x++) {
+        for (int z = 0; z < gridSize; z++) {
+            EntityID entity = ecs.createEntity();
+            
+            Transform transform;
+            transform.position = glm::vec3(
+                x * spacing - offset,
+                0,
+                z * spacing - offset
+            );
+            transform.scale = glm::vec3(0.5f);
+            ecs.addComponent(entity, transform);
+            
+            Tag tag("Duck");
+            ecs.addComponent(entity, tag);
+        }
+    }
+}
+
 int main() {
     ResourcePath::init();
     Config config;
@@ -92,6 +116,13 @@ int main() {
         return -1;
     }
     
+    renderer.initImGui();
+    
+    float xscale, yscale;
+    glfwGetWindowContentScale(renderer.getWindow(), &xscale, &yscale);
+    ImGui::GetIO().FontGlobalScale = xscale;
+    ImGui::GetStyle().ScaleAllSizes(xscale);
+    
     std::cout << "✓ Renderer initialized\n";
     
     Input::init(renderer.getWindow());
@@ -99,7 +130,7 @@ int main() {
     
     Camera camera;
     camera.position = glm::vec3(0, 5, 15);
-    camera.aspectRatio = 1920.0f / 1080.0f;
+    camera.aspectRatio = static_cast<float>(renderer.getWidth()) / static_cast<float>(renderer.getHeight());
     CameraController camController(&camera, config);
     
     VkDescriptorPoolSize poolSize{};
@@ -140,7 +171,7 @@ int main() {
                     renderer.getCommandPool(), renderer.getGraphicsQueue(),
                     descriptorPool, descriptorSetLayout);
     
-    Model cube = modelLoader.load(ResourcePath::models("Duck.glb"));
+    Model duck = modelLoader.load(ResourcePath::models("Duck.glb"));
     
     ECS ecs;
     g_ecs = &ecs;
@@ -154,34 +185,19 @@ int main() {
     renderMask.set(0);
     ecs.setSystemSignature<RenderSystem>(renderMask);
     
-    renderSystem->init(&renderer, &pipeline, &cube, &camera);
+    renderSystem->init(&renderer, &pipeline, &duck, &camera);
     
-    NuklearGUI gui;
-    gui.init(renderer.getDevice(), renderer.getAllocator(), renderer.getRenderPass(),
-             renderer.getWindow(), renderer.getWidth(), renderer.getHeight(),
-             renderer.getCommandPool(), renderer.getGraphicsQueue());
+    // Grid settings
+    int gridSize = 4;
+    int prevGridSize = gridSize;
+    float spacing = 4.0f;
+    float prevSpacing = spacing;
+    float rotationSpeed = 30.0f;
+    bool autoRotate = true;
     
-    const int gridSize = 5;
-    const float spacing = 3.0f;
-    uint32_t entityCount = 0;
+    spawnDucks(ecs, gridSize, spacing);
     
-    for (int x = -gridSize/2; x < gridSize/2; x++) {
-        for (int z = -gridSize/2; z < gridSize/2; z++) {
-            EntityID entity = ecs.createEntity();
-            
-            Transform transform;
-            transform.position = glm::vec3(x * spacing, 0, z * spacing);
-            transform.scale = glm::vec3(0.5f);
-            ecs.addComponent(entity, transform);
-            
-            Tag tag("Duck");
-            ecs.addComponent(entity, tag);
-            
-            entityCount++;
-        }
-    }
-    
-    std::cout << "✓ Spawned " << entityCount << " entities\n";
+    std::cout << "✓ Spawned " << gridSize * gridSize << " entities\n";
     std::cout << "\nControls:\n";
     std::cout << "  WASD + Mouse2 - Move camera\n";
     std::cout << "  J - Toggle UI\n";
@@ -189,39 +205,52 @@ int main() {
     
     bool showUI = true;
     
+    // Accurate FPS timing using chrono
+    using Clock = std::chrono::high_resolution_clock;
+    auto lastTime = Clock::now();
+    auto fpsTimer = Clock::now();
+    int frameCount = 0;
+    float displayFps = 0.0f;
+    float displayFrameTime = 0.0f;
+    float minFrameTime = 1000.0f;
+    float maxFrameTime = 0.0f;
+    
     while (!renderer.shouldClose()) {
+        auto now = Clock::now();
+        float dt = std::chrono::duration<float>(now - lastTime).count();
+        lastTime = now;
+        
+        // FPS calculation every 0.5 seconds
+        frameCount++;
+        float fpsElapsed = std::chrono::duration<float>(now - fpsTimer).count();
+        if (fpsElapsed >= 0.5f) {
+            displayFps = frameCount / fpsElapsed;
+            displayFrameTime = fpsElapsed / frameCount * 1000.0f;
+            frameCount = 0;
+            fpsTimer = now;
+            minFrameTime = 1000.0f;
+            maxFrameTime = 0.0f;
+        }
+        
+        float frameMs = dt * 1000.0f;
+        if (frameMs < minFrameTime) minFrameTime = frameMs;
+        if (frameMs > maxFrameTime) maxFrameTime = frameMs;
+        
         renderer.pollEvents();
         
         if (Input::getKey(Key::Escape)) break;
         if (Input::getKeyDown(Key::J)) showUI = !showUI;
         
         Time::update();
-        float dt = Time::getDeltaTime();
-        
-        gui.newFrame();
-        
-        if (showUI && nk_begin(gui.getContext(), "Stats", nk_rect(10, 10, 250, 200),
-            NK_WINDOW_BORDER|NK_WINDOW_MOVABLE|NK_WINDOW_SCALABLE|NK_WINDOW_TITLE))
-        {
-            nk_layout_row_dynamic(gui.getContext(), 25, 1);
-            nk_labelf(gui.getContext(), NK_TEXT_LEFT, "FPS: %.1f", Time::getFPS());
-            nk_labelf(gui.getContext(), NK_TEXT_LEFT, "Frame: %.2fms", Time::getDeltaTime() * 1000);
-            nk_labelf(gui.getContext(), NK_TEXT_LEFT, "Entities: %d", entityCount);
-            nk_labelf(gui.getContext(), NK_TEXT_LEFT, "Draw Calls: %d", renderSystem->draw_calls);
-            
-            nk_layout_row_dynamic(gui.getContext(), 25, 2);
-            if (nk_button_label(gui.getContext(), "Toggle Vsync")) {
-                // TODO
-            }
-            nk_end(gui.getContext());
-        }
-        
         camController.update(dt, renderer.getWindow());
         
-        for (uint32_t i = 0; i < entityCount; i++) {
-            auto* transform = ecs.getComponent<Transform>(i);
-            if (transform) {
-                transform->rotate(glm::vec3(0, dt * 30.0f, 0));
+        // Rotate ducks
+        if (autoRotate) {
+            for (EntityID entity : renderSystem->entities) {
+                auto* transform = ecs.getComponent<Transform>(entity);
+                if (transform) {
+                    transform->rotate(glm::vec3(0, dt * rotationSpeed, 0));
+                }
             }
         }
         
@@ -242,7 +271,56 @@ int main() {
         vkCmdSetScissor(cmd, 0, 1, &scissor);
         
         renderSystem->render(cmd);
-        gui.render(cmd);
+        
+        if (showUI) {
+            renderer.imguiNewFrame();
+            
+            ImGui::Begin("Debug");
+            
+            // Performance
+            ImGui::Text("FPS: %.1f", displayFps);
+            ImGui::Text("Frame: %.2f ms (min: %.2f, max: %.2f)", displayFrameTime, minFrameTime, maxFrameTime);
+            ImGui::Separator();
+            
+            // Grid controls
+            ImGui::Text("Grid Settings");
+            ImGui::SliderInt("Grid Size", &gridSize, 1, 100);
+            ImGui::SliderFloat("Spacing", &spacing, 1.0f, 10.0f, "%.1f");
+            ImGui::Text("Total Ducks: %d", gridSize * gridSize);
+            ImGui::Separator();
+            
+            // Rendering stats
+            ImGui::Text("Rendering");
+            ImGui::Text("Instances: %u", renderSystem->instances_count);
+            ImGui::Text("Draw calls: %u", renderSystem->draw_calls);
+            ImGui::Text("Triangles: %u", (duck.totalIndices / 3) * renderSystem->instances_count);
+            ImGui::Separator();
+            
+            // Animation
+            ImGui::Text("Animation");
+            ImGui::Checkbox("Auto Rotate", &autoRotate);
+            if (autoRotate) {
+                ImGui::SliderFloat("Rotation Speed", &rotationSpeed, 0.0f, 360.0f, "%.0f deg/s");
+            }
+            ImGui::Separator();
+            
+            // Camera info
+            ImGui::Text("Camera");
+            ImGui::Text("Position: %.1f, %.1f, %.1f", camera.position.x, camera.position.y, camera.position.z);
+           
+            
+            ImGui::End();
+            
+            renderer.imguiRender(cmd);
+            
+            // Respawn if grid changed
+            if (gridSize != prevGridSize || spacing != prevSpacing) {
+                vkDeviceWaitIdle(renderer.getDevice());
+                spawnDucks(ecs, gridSize, spacing);
+                prevGridSize = gridSize;
+                prevSpacing = spacing;
+            }
+        }
         
         renderer.endFrame(cmd);
         Input::update();
@@ -251,9 +329,8 @@ int main() {
     std::cout << "\nCleaning up...\n";
     vkDeviceWaitIdle(renderer.getDevice());
     
-    gui.cleanup();
     renderSystem->instanceBuffer.cleanup();
-    modelLoader.cleanup(cube);
+    modelLoader.cleanup(duck);
     modelLoader.cleanupLoader();
     pipeline.cleanup();
     vkDestroyDescriptorSetLayout(renderer.getDevice(), descriptorSetLayout, nullptr);

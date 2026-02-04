@@ -4,10 +4,10 @@ type = "exec"
 language = "cpp"
 
 [sources]
-dirs = ["src", "external", "external/backends"]
+dirs = ["src", "external", "external/imgui"]
 
 [includes]
-dirs = ["include", "external", "external/Vulkan-Headers/include", "external/backends"]
+dirs = ["include", "external", "external/Vulkan-Headers/include", "external/imgui"]
 
 [build]
 flags = ["-Wall", "-Wextra", "-Wpedantic"]

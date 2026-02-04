@@ -104,7 +104,12 @@ public:
         entities[id].mask.reset();
         return id;
     }
-
+void clear() {
+    for (EntityID e = 0; e < nextEntityID; e++) {
+        destroyEntity(e);
+    }
+    nextEntityID = 0;
+}
     void destroyEntity(EntityID entity) {
         entities[entity].active = false;
         entities[entity].mask.reset();

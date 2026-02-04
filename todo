@@ -1,1 +1,259 @@
-im gui then animations then make thing's look pretty, then physics, then scripting, then game dev features
+ZERO ENGINE DEVELOPMENT ROADMAP
+===============================
+
+PHASE 1: CORE RENDERING & UI
+-----------------------------
+[x] Vulkan renderer initialization
+[x] Instanced rendering pipeline
+[x] Model loading (glTF/GLB)
+[x] Texture loading
+[x] ECS foundation
+[x] Camera system
+[x] Basic ImGui integration
+
+PHASE 2: ANIMATION SYSTEM
+-------------------------
+[ ] Skeletal animation
+    [ ] Bone hierarchy loading
+    [ ] Skinning shader (GPU skinning)
+    [ ] Animation clip loading
+    [ ] Animation playback (play/pause/stop)
+    [ ] Animation blending
+    [ ] Animation state machine
+    [ ] Root motion support
+
+[ ] Procedural animation
+    [ ] IK (inverse kinematics)
+    [ ] Look-at constraints
+    [ ] Procedural walk cycles
+
+[ ] Animation tools
+    [ ] Timeline scrubbing in editor
+    [ ] Animation preview
+    [ ] Blend tree visualization
+
+PHASE 3: VISUAL POLISH
+----------------------
+[ ] Lighting
+    [ ] Point lights
+    [ ] Spot lights
+    [ ] Directional lights with shadows
+    [ ] Shadow mapping (cascaded for large scenes)
+    [ ] Soft shadows (PCF/PCSS)
+
+[ ] Materials
+    [ ] PBR pipeline (metallic/roughness)
+    [ ] Normal mapping
+    [ ] Emission maps
+    [ ] Ambient occlusion
+    [ ] Material editor in ImGui
+
+[ ] Post-processing
+    [ ] HDR rendering
+    [ ] Tonemapping (ACES, Reinhard)
+    [ ] Bloom
+    [ ] SSAO (screen-space ambient occlusion)
+    [ ] Anti-aliasing (FXAA/TAA)
+    [ ] Motion blur
+    [ ] Depth of field
+    [ ] Color grading/LUT
+
+[ ] Environment
+    [ ] Skybox/cubemaps
+    [ ] Reflection probes
+    [ ] Fog (linear/exponential)
+    [ ] Particle system (GPU compute)
+
+[ ] Optimization
+    [ ] Frustum culling
+    [ ] Occlusion culling
+    [ ] LOD system
+    [ ] Texture streaming
+    [ ] Compute shader batching
+
+PHASE 4: PHYSICS
+----------------
+[ ] Physics engine integration (Jolt, Bullet, or PhysX)
+    [ ] Rigid body dynamics
+    [ ] Collision detection
+    [ ] Collision shapes (box, sphere, capsule, mesh, convex hull)
+    [ ] Triggers/sensors
+    [ ] Physics materials (friction, restitution)
+
+[ ] Constraints
+    [ ] Fixed joints
+    [ ] Hinge joints
+    [ ] Slider joints
+    [ ] Spring joints
+    [ ] Ragdolls
+
+[ ] Character physics
+    [ ] Character controller
+    [ ] Ground detection
+    [ ] Slopes and stairs
+    [ ] Moving platforms
+
+[ ] Advanced
+    [ ] Raycasting/shape casting
+    [ ] Continuous collision detection
+    [ ] Physics layers/masks
+    [ ] Debug visualization (wireframes)
+
+PHASE 5: SCRIPTING
+------------------
+[ ] Scripting language integration (Lua, Wren, or C# via Mono)
+    [ ] Script component
+    [ ] Hot reloading
+    [ ] API bindings (entity, transform, input, physics)
+
+[ ] Script lifecycle
+    [ ] init() / start()
+    [ ] update(dt)
+    [ ] fixedUpdate(dt) for physics
+    [ ] onCollision / onTrigger
+    [ ] onDestroy()
+
+[ ] Editor integration
+    [ ] Script creation templates
+    [ ] Syntax error display
+    [ ] Breakpoint debugging (optional)
+    [ ] Exposed variables in inspector
+
+[ ] Native scripting alternative
+    [ ] C++ component hot-reload via DLL/SO
+    [ ] Reflection system for properties
+
+PHASE 6: GAME FEATURES
+----------------------
+[ ] Audio
+    [ ] Audio engine (OpenAL, miniaudio, or FMOD)
+    [ ] 3D positional audio
+    [ ] Music playback
+    [ ] Sound effects
+    [ ] Audio mixer/channels
+    [ ] Reverb zones
+
+[ ] Input
+    [ ] Input action mapping
+    [ ] Gamepad support
+    [ ] Rebindable controls
+    [ ] Input recording/playback
+
+[ ] AI
+    [ ] Navigation mesh generation
+    [ ] Pathfinding (A*)
+    [ ] Behavior trees
+    [ ] State machines
+    [ ] Steering behaviors
+
+[ ] UI system (in-game)
+    [ ] Canvas/screen-space UI
+    [ ] Buttons, sliders, text
+    [ ] UI anchoring/layouts
+    [ ] UI animations
+    [ ] Localization support
+
+[ ] Scene management
+    [ ] Scene serialization (save/load)
+    [ ] Scene transitions
+    [ ] Prefab system
+    [ ] Additive scene loading
+
+[ ] Networking (optional)
+    [ ] Client-server architecture
+    [ ] State synchronization
+    [ ] Lag compensation
+
+PHASE 7: EDITOR
+---------------
+[ ] Scene view
+    [ ] Grid rendering
+    [ ] Multiple viewports
+    [ ] Orthographic views
+    [ ] Camera bookmarks
+
+[ ] Tools
+    [ ] Terrain editor
+    [ ] Spline/path editor
+    [ ] Particle effect editor
+    [ ] Material graph editor
+    [ ] Animation state machine editor
+
+[ ] Workflow
+    [ ] Multi-select entities
+    [ ] Copy/paste entities
+    [ ] Grouping/parenting
+    [ ] Search/filter entities
+    [ ] Bookmarks/favorites
+
+[ ] Project management
+    [ ] Project settings window
+    [ ] Build settings
+    [ ] Quality presets
+    [ ] Input configuration
+    [ ] Tag/layer management
+
+[ ] Debugging
+    [ ] Frame debugger
+    [ ] GPU profiler
+    [ ] Memory profiler
+    [ ] Physics debugger
+    [ ] Draw call inspector
+
+PHASE 8: EXPORT & DISTRIBUTION
+------------------------------
+[ ] Build pipeline
+    [ ] Asset cooking/compression
+    [ ] Shader precompilation
+    [ ] Texture compression (BC/ASTC)
+    [ ] Asset bundling
+
+[ ] Platform targets
+    [ ] Linux executable
+    [ ] Windows executable
+    [ ] macOS (MoltenVK)
+    [ ] Web (WebGPU - future)
+
+[ ] Packaging
+    [ ] Single executable option
+    [ ] Installer generation
+    [ ] Steam integration (Steamworks)
+    [ ] Itch.io export
+
+[ ] Runtime
+    [ ] Splash screen
+    [ ] Loading screens
+    [ ] Crash reporting
+    [ ] Analytics (optional)
+    [ ] Auto-updater
+
+
+ESTIMATED TIMELINE
+==================
+Phase 1: 2-3 weeks    (you are here)
+Phase 2: 3-4 weeks
+Phase 3: 4-6 weeks
+Phase 4: 3-4 weeks
+Phase 5: 3-4 weeks
+Phase 6: 6-8 weeks
+Phase 7: 4-6 weeks
+Phase 8: 2-3 weeks
+
+Total: ~6-9 months for full engine
+
+PRIORITY SHORTCUTS
+==================
+If building a specific game, skip:
+- Terrain editor (if not open world)
+- Networking (if single player)
+- Advanced AI (if simple enemies)
+- Material graph (use code instead)
+
+Minimum viable engine for a 3D game:
+- Rendering ✓
+- Animation
+- Basic physics
+- Simple scripting
+- Scene save/load
+- Audio
+- Build export
