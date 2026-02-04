@@ -30,8 +30,13 @@ extern VulkanRenderer* g_renderer;
 extern ModelLoader* g_modelLoader;
 extern Camera* g_camera;
 extern ShadowMap* g_shadowMap;
+struct PointLight {
+    glm::vec3 position;
+    float radius;
+    glm::vec3 color;
+    float intensity;
+};
 
-// Push constants with shadow support
 struct PushConstants {
     glm::mat4 viewProj;
     glm::mat4 model;
@@ -40,6 +45,15 @@ struct PushConstants {
     float ambientStrength;
     glm::vec3 lightColor;
     float shadowBias;
+    glm::vec3 fogColor;
+    float fogDensity;
+    float fogStart;
+    float fogEnd;
+    float emissionStrength;
+    float useExponentialFog;
+    PointLight pointLights[4];
+    int numPointLights;
+    float padding[3];
 };
 
 // Shadow pass push constants

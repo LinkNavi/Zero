@@ -11,7 +11,7 @@ public:
     float fov = 45.0f;
     float aspectRatio = 16.0f / 9.0f;
     float nearPlane = 0.1f;
-    float farPlane = 50000.0f;
+    float farPlane = 5000.0f;
     
     glm::mat4 getViewMatrix() const {
         return glm::lookAt(position, target, up);

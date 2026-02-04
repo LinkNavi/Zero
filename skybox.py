@@ -5,13 +5,19 @@ import Imath
 import cv2
 from PIL import Image
 
-def exr_to_cubemap(exr_path, output_dir, size=1024):
+def exr_to_cubemap(exr_path, output_dir, size=None):
     # Read EXR
     exr = OpenEXR.InputFile(exr_path)
     header = exr.header()
     dw = header['dataWindow']
     width = dw.max.x - dw.min.x + 1
     height = dw.max.y - dw.min.y + 1
+    
+    # Auto-detect face size from equirectangular dimensions
+    # For equirect: width = 2 * height, face_size = height / 2
+    if size is None:
+        size = height // 2  # Use half of height as face size
+        print(f"Auto-detected face size: {size}x{size} (from {width}x{height} equirect)")
     
     # Read RGB channels
     FLOAT = Imath.PixelType(Imath.PixelType.FLOAT)
@@ -43,6 +49,8 @@ def exr_to_cubemap(exr_path, output_dir, size=1024):
         return ldr[py, px]
     
     faces = {}
+    
+    print(f"Generating {face_size}x{face_size} cubemap faces...")
     
     # +X (right)
     face = np.zeros((face_size, face_size, 3), dtype=np.uint8)
@@ -104,8 +112,12 @@ def exr_to_cubemap(exr_path, output_dir, size=1024):
     for name, img in faces.items():
         img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         Image.fromarray(img_rgb).save(f"{output_dir}/{name}.jpg", quality=95)
+        print(f"  Saved {name}.jpg")
     
     print(f"✓ Saved 6 cubemap faces to {output_dir}")
 
-# Usage
-exr_to_cubemap("skybox.exr", "textures/skybox", size=1024)
+# Usage - size parameter is now optional (auto-detects from EXR)
+exr_to_cubemap("skybox.exr", "textures/skybox")
+
+# Or override with specific size:
+# exr_to_cubemap("skybox.exr", "textures/skybox", size=2048)

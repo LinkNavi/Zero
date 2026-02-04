@@ -9,7 +9,7 @@ layout(location = 0) in vec3 inPos;
 layout(location = 0) out vec3 fragTexCoord;
 
 void main() {
-    fragTexCoord = vec3(inPos.x, inPos.y, -inPos.z); // Negate Z
+    fragTexCoord = inPos;
     vec4 pos = ubo.projection * ubo.view * vec4(inPos, 1.0);
     gl_Position = pos.xyww;
 }

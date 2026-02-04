@@ -106,7 +106,9 @@ private:
             std::cerr << "Skybox needs 6 faces\n";
             return false;
         }
+        
         stbi_set_flip_vertically_on_load(false);
+        
         int width, height, channels;
         stbi_uc* pixels = stbi_load(faces[0].c_str(), &width, &height, &channels, 4);
         if (!pixels) {
@@ -157,7 +159,7 @@ private:
         // Create cubemap image
         VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         imgInfo.imageType = VK_IMAGE_TYPE_2D;
-       imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+        imgInfo.format = VK_FORMAT_B8G8R8A8_UNORM;
         imgInfo.extent = {(uint32_t)width, (uint32_t)height, 1};
         imgInfo.mipLevels = 1;
         imgInfo.arrayLayers = 6;
@@ -203,7 +205,7 @@ private:
         VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         viewInfo.image = cubemapImage;
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-       viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
+        viewInfo.format = VK_FORMAT_B8G8R8A8_UNORM;
         viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6};
         if (vkCreateImageView(device, &viewInfo, nullptr, &cubemapView) != VK_SUCCESS) {
             return false;
@@ -224,16 +226,16 @@ private:
         return true;
     }
     
-   bool createVertexBuffer() {
-    // Scale up the cube - was -1 to 1, now -100 to 100
-    float vertices[] = {
-        -100,-100,-100,  100,-100,-100,  100,100,-100,  100,100,-100,  -100,100,-100,  -100,-100,-100,
-        -100,-100,100,  -100,100,100,  100,100,100,  100,100,100,  100,-100,100,  -100,-100,100,
-        -100,100,-100,  -100,100,100,  100,100,100,  100,100,100,  100,100,-100,  -100,100,-100,
-        -100,-100,-100,  100,-100,-100,  100,-100,100,  100,-100,100,  -100,-100,100,  -100,-100,-100,
-        -100,-100,-100,  -100,-100,100,  -100,100,100,  -100,100,100,  -100,100,-100,  -100,-100,-100,
-        100,-100,-100,  100,100,-100,  100,100,100,  100,100,100,  100,-100,100,  100,-100,-100
-    };
+    bool createVertexBuffer() {
+        // Cube vertices (positions only) - 36 vertices for 6 faces
+        float vertices[] = {
+            -100,-100,-100,  100,-100,-100,  100,100,-100,  100,100,-100,  -100,100,-100,  -100,-100,-100,
+            -100,-100,100,  -100,100,100,  100,100,100,  100,100,100,  100,-100,100,  -100,-100,100,
+            -100,100,-100,  -100,100,100,  100,100,100,  100,100,100,  100,100,-100,  -100,100,-100,
+            -100,-100,-100,  100,-100,-100,  100,-100,100,  100,-100,100,  -100,-100,100,  -100,-100,-100,
+            -100,-100,-100,  -100,-100,100,  -100,100,100,  -100,100,100,  -100,100,-100,  -100,-100,-100,
+            100,-100,-100,  100,100,-100,  100,100,100,  100,100,100,  100,-100,100,  100,-100,-100
+        };
         
         VkDeviceSize bufSize = sizeof(vertices);
         
@@ -344,17 +346,16 @@ private:
     }
     
     bool createPipeline(VkRenderPass renderPass, const std::string& vertPath, const std::string& fragPath) {
-         auto vertCode = readFile(vertPath);
-    auto fragCode = readFile(fragPath);
-    if (vertCode.empty()) {
-        std::cerr << "Failed to read vertex shader: " << vertPath << "\n";
-        return false;
-    }
-    if (fragCode.empty()) {
-        std::cerr << "Failed to read fragment shader: " << fragPath << "\n";
-        return false;
-    }
-        if (vertCode.empty() || fragCode.empty()) return false;
+        auto vertCode = readFile(vertPath);
+        auto fragCode = readFile(fragPath);
+        if (vertCode.empty()) {
+            std::cerr << "Failed to read vertex shader: " << vertPath << "\n";
+            return false;
+        }
+        if (fragCode.empty()) {
+            std::cerr << "Failed to read fragment shader: " << fragPath << "\n";
+            return false;
+        }
         
         VkShaderModule vertModule = createShaderModule(vertCode);
         VkShaderModule fragModule = createShaderModule(fragCode);
@@ -397,7 +398,7 @@ private:
         VkPipelineDepthStencilStateCreateInfo depthStencil{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
         depthStencil.depthTestEnable = VK_TRUE;
         depthStencil.depthWriteEnable = VK_FALSE;
-       depthStencil.depthCompareOp = VK_COMPARE_OP_ALWAYS;
+        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
         
         VkPipelineColorBlendAttachmentState colorBlendAttachment{};
         colorBlendAttachment.colorWriteMask = 0xF;
