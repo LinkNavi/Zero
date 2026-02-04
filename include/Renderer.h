@@ -162,6 +162,7 @@ public:
         return true;
     }
 
+VkInstance getInstance() const { return instance; }
     void beginFrame(VkCommandBuffer& cmd) {
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
         
@@ -487,3 +488,5 @@ private:
         return true;
     }
 };
+
+

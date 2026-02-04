@@ -1,307 +1,284 @@
-// example_usage.cpp - Demonstrates all new systems
-
+#include "Renderer.h"
+#include "PipelineInstanced.h"
+#include "ModelLoader.h"
+#include "Camera.h"
+#include "CameraController.h"
+#include "Input.h"
+#include "Time.h"
 #include "Engine.h"
 #include "transform.h"
 #include "tags.h"
-#include "event_system.h"
-#include "timer.h"
-#include "asset_manager.h"
-#include "prefab.h"
-#include "spatial_query.h"
-#include "component_registry.h"
-#include "PhysicsSystem.h"
+#include "Config.h"
+#include "ResourcePath.h"
+#include "ImGuiLayer.h"
+#include "DebugUI.h"
 #include <iostream>
-#include <thread>
-#include "ScenePackager.h"
-// Example game where we use all systems together
 
-int main() {
-    std::cout << "=== Engine Systems Example ===" << std::endl;
+ECS* g_ecs = nullptr;
+
+class RenderSystem : public System {
+public:
+    InstancedPipeline* pipeline = nullptr;
+    VulkanRenderer* renderer = nullptr;
+    Model* model = nullptr;
+    InstanceBuffer instanceBuffer;
+    Camera* camera = nullptr;
+    uint32_t instances_count = 0;
+    uint32_t draw_calls = 0;
     
-    // === 1. Setup ECS ===
-    ECS ecs;
-    
-    // Register components
-    ecs.registerComponent<Transform>();
-    ecs.registerComponent<Tag>();
-    ecs.registerComponent<Layer>();
-    ecs.registerComponent<RigidBody>();
-    ecs.registerComponent<Collider>();
-    
-    // === 2. Setup Component Registry ===
-    ComponentRegistry& registry = getGlobalComponentRegistry();
-    registry.registerComponent<Transform>("Transform");
-    registry.registerComponent<Tag>("Tag");
-    registry.registerComponent<Layer>("Layer");
-    registry.registerComponent<RigidBody>("RigidBody");
-    registry.registerComponent<Collider>("Collider");
-    registry.printRegistry();
-    
-    // === 3. Setup Event System ===
-    EventSystem events;
-    
-    // Subscribe to collision events
-    events.subscribe(EventType::OnCollisionEnter, [](const Event& e) {
-        EntityID a = e.entity;
-        EntityID b = e.get<EntityID>("other", 0);
-        std::cout << "Collision: Entity " << a << " hit Entity " << b << std::endl;
-    });
-    
-    // Subscribe to custom events
-    events.subscribe("PlayerScored", [](const Event& e) {
-        int score = e.get<int>("score", 0);
-        std::cout << "Player scored! Total: " << score << std::endl;
-    });
-    
-    // === 4. Setup Timer System ===
-    TimerManager timers;
-    
-    // Create a one-shot timer
-    timers.after(2.0f, []() {
-        std::cout << "2 seconds elapsed!" << std::endl;
-    });
-    
-    // Create repeating timer
-    timers.every(1.0f, []() {
-        std::cout << "Tick!" << std::endl;
-    }, "game_tick");
-    
-    // === 5. Create Entities with Tags and Layers ===
-    
-    // Player entity
-    EntityID player = ecs.createEntity();
-    {
-        Transform transform(glm::vec3(0, 0, 0));
-        ecs.addComponent(player, transform);
-        
-        Tag tag("Player");
-        ecs.addComponent(player, tag);
-        
-        Layer layer(Layers::Player);
-        ecs.addComponent(player, layer);
-        
-        RigidBody rb;
-        rb.mass = 70.0f;
-        rb.useGravity = true;
-        ecs.addComponent(player, rb);
-        
-        Collider col;
-        col.type = ColliderType::Capsule;
-        col.radius = 0.5f;
-        ecs.addComponent(player, col);
-    }
-    std::cout << "Created Player (ID: " << player << ")" << std::endl;
-    
-    // Enemy entities
-    for (int i = 0; i < 5; i++) {
-        EntityID enemy = ecs.createEntity();
-        
-        Transform transform(glm::vec3(i * 3.0f, 0, 5));
-        ecs.addComponent(enemy, transform);
-        
-        Tag tag("Enemy");
-        ecs.addComponent(enemy, tag);
-        
-        Layer layer(Layers::Enemy);
-        ecs.addComponent(enemy, layer);
-        
-        Collider col;
-        col.type = ColliderType::Sphere;
-        col.radius = 1.0f;
-        ecs.addComponent(enemy, col);
-        
-        std::cout << "Created Enemy (ID: " << enemy << ")" << std::endl;
+    void init(VulkanRenderer* rend, InstancedPipeline* pipe, Model* mdl, Camera* cam) {
+        renderer = rend;
+        pipeline = pipe;
+        model = mdl;
+        camera = cam;
+        instanceBuffer.create(renderer->getAllocator(), 10000);
     }
     
-    // === 6. Query System ===
-    std::cout << "\n=== Entity Queries ===" << std::endl;
-    
-    // Find player
-    EntityID foundPlayer = TagLayerQuery::findEntityWithTag(&ecs, "Player");
-    std::cout << "Found player: " << foundPlayer << std::endl;
-    
-    // Find all enemies
-    auto enemies = TagLayerQuery::findEntitiesWithTag(&ecs, "Enemy");
-    std::cout << "Found " << enemies.size() << " enemies" << std::endl;
-    
-    // Find entities on player layer
-    auto playerLayerEntities = TagLayerQuery::findEntitiesOnLayer(&ecs, Layers::Player);
-    std::cout << "Entities on Player layer: " << playerLayerEntities.size() << std::endl;
-    
-    // === 7. Spatial Queries ===
-    std::cout << "\n=== Spatial Queries ===" << std::endl;
-    
-    // Raycast forward from player
-    auto* playerTransform = ecs.getComponent<Transform>(player);
-    if (playerTransform) {
-        glm::vec3 forward = playerTransform->forward();
-        RaycastHit hit = SpatialQuery::raycast(&ecs, playerTransform->position, forward, 50.0f);
+    void update(float dt) override {
+        std::vector<InstanceData> instances;
         
-        if (hit.hit) {
-            std::cout << "Raycast hit entity " << hit.entity 
-                      << " at distance " << hit.distance << std::endl;
-        } else {
-            std::cout << "Raycast hit nothing" << std::endl;
+        for (EntityID entity : entities) {
+            auto* transform = g_ecs->getComponent<Transform>(entity);
+            if (!transform) continue;
+            
+            InstanceData instance;
+            instance.model = transform->getLocalMatrix();
+            instance.color = glm::vec4(1.0f, 0.8f, 0.2f, 1.0f);
+            instances.push_back(instance);
+        }
+        
+        instances_count = static_cast<uint32_t>(instances.size());
+        if (instances_count > 0) {
+            instanceBuffer.update(instances);
         }
     }
     
-    // Find entities in radius
-    auto nearbyEntities = SpatialQuery::findInRadius(&ecs, glm::vec3(0), 10.0f);
-    std::cout << "Entities within 10 units: " << nearbyEntities.size() << std::endl;
-    
-    // Overlap sphere (physics query)
-    auto overlapping = SpatialQuery::overlapSphere(&ecs, glm::vec3(3, 0, 5), 2.0f);
-    std::cout << "Entities overlapping sphere: " << overlapping.size() << std::endl;
-    
-    // === 8. Prefab System ===
-    std::cout << "\n=== Prefab System ===" << std::endl;
-    
-    // Create a prefab programmatically
-    Prefab enemyPrefab("BasicEnemy");
-    enemyPrefab.data = {
-        {"name", "BasicEnemy"},
-        {"components", {
-            {"transform", {
-                {"scale", {1.0, 1.0, 1.0}}
-            }},
-            {"tag", "Enemy"},
-            {"layer", (uint32_t)(1 << Layers::Enemy)},
-            {"collider", {
-                {"type", "sphere"},
-                {"radius", 1.0f},
-                {"isTrigger", false}
-            }},
-            {"rigidbody", {
-                {"mass", 50.0f},
-                {"useGravity", true},
-                {"isKinematic", false}
-            }}
-        }}
-    };
-    
-    // Save prefab
-    enemyPrefab.save("prefabs/basic_enemy.json");
-    
-    // Instantiate prefab
-    EntityID spawned = enemyPrefab.instantiate(&ecs, glm::vec3(10, 0, 0));
-    std::cout << "Spawned enemy from prefab (ID: " << spawned << ")" << std::endl;
-    
-  // === 9. Scene Serialization ===
-std::cout << "\n=== Scene Serialization ===" << std::endl;
+    void render(VkCommandBuffer cmd) {
+        if (instances_count == 0) return;
+        
+        draw_calls = 1;
+        
+        pipeline->bind(cmd);
+        
+        PushConstantsInstanced pc;
+        pc.viewProj = camera->getViewProjectionMatrix();
+        pc.lightDir = glm::normalize(glm::vec3(-0.5f, -1.0f, -0.3f));
+        pc.lightColor = glm::vec3(1.0f, 0.95f, 0.9f);
+        pc.ambientStrength = 0.3f;
+        pipeline->pushConstants(cmd, pc);
+        
+        pipeline->bindDescriptorSet(cmd, model->descriptorSet);
+        
+        VkDeviceSize offsets[] = {0};
+        VkBuffer instanceBuf = instanceBuffer.getBuffer();
+        
+        vkCmdBindVertexBuffers(cmd, 0, 1, &model->combinedVertexBuffer, offsets);
+        vkCmdBindVertexBuffers(cmd, 1, 1, &instanceBuf, offsets);
+        vkCmdBindIndexBuffer(cmd, model->combinedIndexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        
+        vkCmdDrawIndexed(cmd, model->totalIndices, instances_count, 0, 0, 0);
+    }
+};
 
-// Create directories if they don't exist
-std::filesystem::create_directories("scenes");
-std::filesystem::create_directories("prefabs");
-
-// Save current scene using ScenePackage
-ScenePackaging::ScenePackager::saveScene(&ecs, "scenes/test_scene.zscene", "TestScene");
-
-// You can also save the prefab with the package
-ScenePackage::PackageWriter prefabWriter;
-prefabWriter.setSceneData(enemyPrefab.data.dump());
-prefabWriter.write("prefabs/basic_enemy.zscene");
+int main() {
+    ResourcePath::init();
+    Config config;
+    config.load(ResourcePath::config("config.ini"));
     
-    // === 10. Event Emission ===
-    std::cout << "\n=== Event System ===" << std::endl;
-    
-    // Emit collision event
-    Event collision;
-    collision.type = EventType::OnCollisionEnter;
-    collision.entity = player;
-    collision.setEntity("other", enemies[0]);
-    collision.setVec3("point", glm::vec3(0, 0, 0));
-    events.emit(collision);
-    
-    // Emit custom event
-  Event scoreEvent{EventType::Custom, 0, "PlayerScored", {}};
-	scoreEvent.setInt("score", 100);
-    events.emit(scoreEvent);
-    
-    // Queue events for later
-    events.queue(collision);
-    events.processQueue();
-    
-    // === 11. Transform Hierarchy ===
-    std::cout << "\n=== Transform Hierarchy ===" << std::endl;
-    
-    // Create parent-child relationship
-    EntityID weapon = ecs.createEntity();
-    Transform weaponTransform(glm::vec3(1, 0, 0)); // Offset from player
-    ecs.addComponent(weapon, weaponTransform);
-    
-    // Attach weapon to player
-    TransformSystem transformSystem;
-    transformSystem.init(&ecs);
-    transformSystem.attachToParent(weapon, player, false);
-    
-    std::cout << "Attached weapon to player" << std::endl;
-    
-    // Get world position of weapon (includes parent transform)
-    auto* weaponTrans = ecs.getComponent<Transform>(weapon);
-    if (weaponTrans) {
-        glm::vec3 worldPos = weaponTrans->getWorldPosition(&ecs);
-        std::cout << "Weapon world position: (" 
-                  << worldPos.x << ", " << worldPos.y << ", " << worldPos.z << ")" << std::endl;
+    // Init renderer
+    VulkanRenderer renderer;
+    if (!renderer.init(1920, 1080, "Engine with ImGui")) {
+        std::cerr << "Failed to init renderer\n";
+        return -1;
     }
     
-    // === 12. Asset Manager (mock example) ===
-    std::cout << "\n=== Asset Manager ===" << std::endl;
+    std::cout << "✓ Renderer initialized\n";
     
-    AssetManager assets;
-    // assets.init(&modelLoader); // Would init with actual loaders
-    assets.setBaseDirectories("models/", "textures/", "sounds/");
-    assets.printStats();
+    // Init input & time
+    Input::init(renderer.getWindow());
+    Time::init();
     
-    // Would load assets like:
-    // auto model = assets.loadModel("enemy.glb");
-    // auto texture = assets.loadTexture("enemy_diffuse.png");
+    // Camera
+    Camera camera;
+    camera.position = glm::vec3(0, 5, 15);
+    camera.aspectRatio = 1920.0f / 1080.0f;
+    CameraController camController(&camera, config);
     
-    // === 13. Timer Updates (simulate game loop) ===
-    std::cout << "\n=== Game Loop Simulation ===" << std::endl;
+    // Create descriptor pool
+    VkDescriptorPoolSize poolSize{};
+    poolSize.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    poolSize.descriptorCount = 100;
     
-    float dt = 0.016f; // 60 FPS
-    for (int frame = 0; frame < 10; frame++) {
-        // Update timers
-        timers.update(dt);
-        
-        // Update physics (would be your actual physics system)
-        // physicsSystem.update(dt);
-        
-        // Process events
-        events.processQueue();
-        
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    VkDescriptorPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    poolInfo.poolSizeCount = 1;
+    poolInfo.pPoolSizes = &poolSize;
+    poolInfo.maxSets = 100;
+    poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+    
+    VkDescriptorPool descriptorPool;
+    vkCreateDescriptorPool(renderer.getDevice(), &poolInfo, nullptr, &descriptorPool);
+    
+    // Create descriptor set layout
+    VkDescriptorSetLayoutBinding samplerBinding{};
+    samplerBinding.binding = 0;
+    samplerBinding.descriptorCount = 1;
+    samplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    
+    VkDescriptorSetLayoutCreateInfo layoutInfo{};
+    layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    layoutInfo.bindingCount = 1;
+    layoutInfo.pBindings = &samplerBinding;
+    
+    VkDescriptorSetLayout descriptorSetLayout;
+    vkCreateDescriptorSetLayout(renderer.getDevice(), &layoutInfo, nullptr, &descriptorSetLayout);
+    
+    // Pipeline
+    InstancedPipeline pipeline;
+    pipeline.init(renderer.getDevice(), renderer.getRenderPass(),
+                 ResourcePath::shaders("instanced_vert.spv"),
+                 ResourcePath::shaders("instanced_frag.spv"));
+    
+    // Load model
+    ModelLoader modelLoader;
+    modelLoader.init(renderer.getDevice(), renderer.getAllocator(),
+                    renderer.getCommandPool(), renderer.getGraphicsQueue(),
+                    descriptorPool, descriptorSetLayout);
+    
+    Model cube = modelLoader.load(ResourcePath::models("Duck.glb"));
+    
+    // ImGui setup
+    ImGuiLayer imgui;
+    uint32_t queueFamily = 0; // Assuming graphics queue family 0
+ if (!imgui.init(renderer.getWindow(), 
+                renderer.getInstance(),  // ← Fixed!
+                renderer.getPhysicalDevice(),
+                renderer.getDevice(),
+                queueFamily,
+                renderer.getGraphicsQueue(),
+                2)) {
+    std::cerr << "Failed to init ImGui\n";
+    return -1;
+}
+//    imgui.uploadFonts(renderer.getCommandPool(), renderer.getGraphicsQueue())
+    std::cout << "✓ ImGui initialized\n";
+    
+    DebugUI debugUI;
+    
+    // ECS setup
+    ECS ecs;
+    g_ecs = &ecs;
+    
+    ecs.registerComponent<Transform>();
+    ecs.registerComponent<Tag>();
+    ecs.registerComponent<Layer>();
+
+
+    
+    auto renderSystem = ecs.registerSystem<RenderSystem>();
+    ComponentMask renderMask;
+    renderMask.set(0);
+    ecs.setSystemSignature<RenderSystem>(renderMask);
+    
+    renderSystem->init(&renderer, &pipeline, &cube, &camera);
+    
+    // Spawn entities
+    const int gridSize = 5;
+    const float spacing = 3.0f;
+    uint32_t entityCount = 0;
+    
+    for (int x = -gridSize/2; x < gridSize/2; x++) {
+        for (int z = -gridSize/2; z < gridSize/2; z++) {
+            EntityID entity = ecs.createEntity();
+            
+            Transform transform;
+            transform.position = glm::vec3(x * spacing, 0, z * spacing);
+            transform.scale = glm::vec3(0.5f);
+            ecs.addComponent(entity, transform);
+            
+            Tag tag("Duck");
+            ecs.addComponent(entity, tag);
+            
+            entityCount++;
+        }
     }
     
-    // === 14. Cleanup ===
-    std::cout << "\n=== Cleanup ===" << std::endl;
+    std::cout << "✓ Spawned " << entityCount << " entities\n";
+    std::cout << "\nControls:\n";
+    std::cout << "  WASD + Mouse2 - Move camera\n";
+    std::cout << "  F1 - Toggle UI\n";
+    std::cout << "  ESC - Exit\n\n";
     
-    timers.clear();
-    events.clear();
-    assets.clear();
+    bool showUI = true;
     
-    std::cout << "\nExample complete!" << std::endl;
+    // Main loop
+    while (!renderer.shouldClose()) {
+        renderer.pollEvents();
+        
+        if (Input::getKey(Key::Escape)) break;
+        if (Input::getKeyDown(Key::J)) showUI = !showUI;
+        
+        Time::update();
+        float dt = Time::getDeltaTime();
+        
+        // Update camera
+        camController.update(dt, renderer.getWindow());
+        
+        // Rotate entities
+        for (size_t i = 0; i < 1000; i++) {
+            auto* transform = ecs.getComponent<Transform>(i);
+            if (transform) {
+                transform->rotate(glm::vec3(0, dt * 30.0f, 0));
+            }
+        }
+        
+        // Update systems
+        renderSystem->update(dt);
+        
+        // ImGui frame
+        imgui.newFrame();
+        
+        if (showUI) {
+            debugUI.render(&ecs, &camera, entityCount, renderSystem->draw_calls);
+        }
+        
+        // Render
+        VkCommandBuffer cmd;
+        renderer.beginFrame(cmd);
+        
+        VkViewport viewport{};
+        viewport.width = static_cast<float>(renderer.getWidth());
+        viewport.height = static_cast<float>(renderer.getHeight());
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        
+        VkRect2D scissor{};
+        scissor.extent = {renderer.getWidth(), renderer.getHeight()};
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+        
+        renderSystem->render(cmd);
+        
+        // Render ImGui
+        imgui.render(cmd);
+        
+        renderer.endFrame(cmd);
+        Input::update();
+    }
+    
+    // Cleanup
+    std::cout << "\nCleaning up...\n";
+    vkDeviceWaitIdle(renderer.getDevice());
+    
+    imgui.cleanup(renderer.getDevice());
+    renderSystem->instanceBuffer.cleanup();
+    modelLoader.cleanup(cube);
+    modelLoader.cleanupLoader();
+    pipeline.cleanup();
+    vkDestroyDescriptorSetLayout(renderer.getDevice(), descriptorSetLayout, nullptr);
+    vkDestroyDescriptorPool(renderer.getDevice(), descriptorPool, nullptr);
+    renderer.cleanup();
     
     return 0;
 }
-
-/*
-Expected Output:
-
-=== Engine Systems Example ===
-Registered component: Transform (size: 112 bytes, ID: 0)
-Registered component: Tag (size: 32 bytes, ID: 1)
-...
-Created Player (ID: 0)
-Created Enemy (ID: 1)
-...
-Found player: 0
-Found 5 enemies
-Raycast hit entity 1 at distance 5.2
-Spawned enemy from prefab (ID: 6)
-Collision: Entity 0 hit Entity 1
-Player scored! Total: 100
-Tick!
-Tick!
-...
-*/
