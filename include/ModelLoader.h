@@ -10,34 +10,66 @@
 #include <string>
 #include "stb_image.h"
 #include "stb_image_write.h"
-
+#include <assimp/config.h>
 #include <vector>
 #include "iomanip"
 #include <unordered_map>
 #include <iostream>
 #include <filesystem>
 #include "Texture.h"
-// Full vertex format with all data
-struct VertexFull {
-    glm::vec3 position;
-    glm::vec3 normal;
-    glm::vec2 texCoord;
-    glm::vec4 color{1.0f};
-    glm::ivec4 boneIds{-1};
-    glm::vec4 boneWeights{0.0f};
-};
 
-// Simple vertex format for instanced rendering (matches shader)
 struct Vertex {
     glm::vec3 position;
     glm::vec3 normal;
     glm::vec2 texCoord;
+    glm::vec4 color{1.0f};
+    glm::ivec4 boneIds{-1, -1, -1, -1};
+    glm::vec4 boneWeights{0.0f};
+    
+    static VkVertexInputBindingDescription getBindingDescription() {
+        VkVertexInputBindingDescription desc{};
+        desc.binding = 0;
+        desc.stride = sizeof(Vertex);
+        desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        return desc;
+    }
+    
+    static std::vector<VkVertexInputAttributeDescription> getAttributeDescriptions() {
+        std::vector<VkVertexInputAttributeDescription> attrs(6);
+        
+        attrs[0].binding = 0;
+        attrs[0].location = 0;
+        attrs[0].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attrs[0].offset = offsetof(Vertex, position);
+        
+        attrs[1].binding = 0;
+        attrs[1].location = 1;
+        attrs[1].format = VK_FORMAT_R32G32B32_SFLOAT;
+        attrs[1].offset = offsetof(Vertex, normal);
+        
+        attrs[2].binding = 0;
+        attrs[2].location = 2;
+        attrs[2].format = VK_FORMAT_R32G32_SFLOAT;
+        attrs[2].offset = offsetof(Vertex, texCoord);
+        
+        attrs[3].binding = 0;
+        attrs[3].location = 3;
+        attrs[3].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attrs[3].offset = offsetof(Vertex, color);
+        
+        attrs[4].binding = 0;
+        attrs[4].location = 4;
+        attrs[4].format = VK_FORMAT_R32G32B32A32_SINT;
+        attrs[4].offset = offsetof(Vertex, boneIds);
+        
+        attrs[5].binding = 0;
+        attrs[5].location = 5;
+        attrs[5].format = VK_FORMAT_R32G32B32A32_SFLOAT;
+        attrs[5].offset = offsetof(Vertex, boneWeights);
+        
+        return attrs;
+    }
 };
-
-// Alias for internal use
-using VertexInternal = VertexFull;
-
-
 
 struct SubMesh {
     uint32_t indexOffset = 0;
@@ -98,7 +130,6 @@ struct Model {
     VmaAllocation vertexAllocation = nullptr;
     VmaAllocation indexAllocation = nullptr;
     
-    // Combined buffers for instanced rendering (points to same buffers)
     VkBuffer combinedVertexBuffer = VK_NULL_HANDLE;
     VkBuffer combinedIndexBuffer = VK_NULL_HANDLE;
     VmaAllocation combinedVertexAllocation = nullptr;
@@ -122,6 +153,10 @@ class ModelLoader {
     Texture defaultWhiteTexture;
     Texture defaultNormalTexture;
     
+    // Temporary storage during loading
+    std::unordered_map<std::string, int> tempBoneMap;
+    std::vector<BoneInfo> tempBones;
+    
 public:
     bool init(VkDevice dev, VmaAllocator alloc, VkCommandPool cmdPool, VkQueue q,
               VkDescriptorPool descPool, VkDescriptorSetLayout descLayout) {
@@ -138,21 +173,20 @@ public:
     
     Model load(const std::string& path) {
         Model model;
-        
-        std::string ext = std::filesystem::path(path).extension().string();
-        for (auto& c : ext) c = tolower(c);
+        tempBoneMap.clear();
+        tempBones.clear();
         
         Assimp::Importer importer;
-        
-        unsigned int flags = 
-            aiProcess_Triangulate |
-            aiProcess_GenNormals |
-            aiProcess_CalcTangentSpace |
-            aiProcess_JoinIdenticalVertices |
-            aiProcess_OptimizeMeshes |
-            aiProcess_OptimizeGraph |
-            aiProcess_LimitBoneWeights |
-            aiProcess_FlipUVs;
+        importer.SetPropertyBool(AI_CONFIG_IMPORT_FBX_PRESERVE_PIVOTS, false);
+       unsigned int flags = 
+    aiProcess_Triangulate |
+    aiProcess_GenNormals |
+    aiProcess_CalcTangentSpace |
+    aiProcess_JoinIdenticalVertices |
+    aiProcess_OptimizeMeshes |
+    aiProcess_LimitBoneWeights |
+    aiProcess_FlipUVs |
+    aiProcess_PopulateArmatureData; 
         
         const aiScene* scene = importer.ReadFile(path, flags);
         
@@ -166,20 +200,26 @@ public:
         
         model.globalInverseTransform = glm::inverse(aiToGlm(scene->mRootNode->mTransformation));
         
-        // Load materials
         loadMaterials(scene, baseDir, model);
         
-        // Load meshes recursively
+        // First pass: collect all bones
+        collectBones(scene);
+        
+        // Build bone hierarchy
+        buildBoneHierarchy(scene->mRootNode, -1);
+        
+        // Copy to model
+        model.bones = tempBones;
+        model.boneMap = tempBoneMap;
+        
+        // Process meshes
         processNode(scene->mRootNode, scene, model, glm::mat4(1.0f));
         
-        // Load animations
         loadAnimations(scene, model);
         
-        // Upload to GPU
         createBuffers(model);
         createDescriptorSet(model);
         
-        // Set combined buffer pointers and total indices
         model.combinedVertexBuffer = model.vertexBuffer;
         model.combinedIndexBuffer = model.indexBuffer;
         model.combinedVertexAllocation = model.vertexAllocation;
@@ -205,7 +245,6 @@ public:
         if (model.indexBuffer) {
             vmaDestroyBuffer(allocator, model.indexBuffer, model.indexAllocation);
         }
-        // Don't double-free combined buffers since they point to the same memory
         model.combinedVertexBuffer = VK_NULL_HANDLE;
         model.combinedIndexBuffer = VK_NULL_HANDLE;
         
@@ -243,6 +282,45 @@ private:
     glm::quat aiToGlm(const aiQuaternion& q) { return glm::quat(q.w, q.x, q.y, q.z); }
     glm::vec4 aiToGlm(const aiColor4D& c) { return glm::vec4(c.r, c.g, c.b, c.a); }
     
+    void collectBones(const aiScene* scene) {
+        for (unsigned int m = 0; m < scene->mNumMeshes; m++) {
+            aiMesh* mesh = scene->mMeshes[m];
+            
+            for (unsigned int b = 0; b < mesh->mNumBones; b++) {
+                aiBone* bone = mesh->mBones[b];
+                std::string boneName = bone->mName.C_Str();
+                
+                if (tempBoneMap.find(boneName) == tempBoneMap.end()) {
+                    int boneIndex = static_cast<int>(tempBones.size());
+                    tempBoneMap[boneName] = boneIndex;
+                    
+                    BoneInfo boneInfo;
+                    boneInfo.name = boneName;
+                    boneInfo.offset = aiToGlm(bone->mOffsetMatrix);
+                    boneInfo.parentIndex = -1;
+                    tempBones.push_back(boneInfo);
+                }
+            }
+        }
+    }
+    
+    void buildBoneHierarchy(aiNode* node, int parentBoneIndex) {
+        std::string nodeName = node->mName.C_Str();
+        int currentBoneIndex = -1;
+        
+        auto it = tempBoneMap.find(nodeName);
+        if (it != tempBoneMap.end()) {
+            currentBoneIndex = it->second;
+            tempBones[currentBoneIndex].parentIndex = parentBoneIndex;
+        }
+        
+        int nextParent = (currentBoneIndex != -1) ? currentBoneIndex : parentBoneIndex;
+        
+        for (unsigned int i = 0; i < node->mNumChildren; i++) {
+            buildBoneHierarchy(node->mChildren[i], nextParent);
+        }
+    }
+    
     void loadMaterials(const aiScene* scene, const std::string& baseDir, Model& model) {
         for (unsigned int i = 0; i < scene->mNumMaterials; i++) {
             aiMaterial* mat = scene->mMaterials[i];
@@ -269,7 +347,6 @@ private:
                 material.roughness = value;
             }
             
-            // Load textures
             aiString texPath;
             if (mat->GetTexture(aiTextureType_DIFFUSE, 0, &texPath) == AI_SUCCESS) {
                 material.albedoTexture = loadTexture(scene, baseDir, texPath.C_Str(), model);
@@ -295,7 +372,6 @@ private:
     int loadTexture(const aiScene* scene, const std::string& baseDir, const char* path, Model& model) {
         std::string texPath = path;
         
-        // Check if embedded texture
         if (texPath[0] == '*') {
             int texIndex = std::stoi(texPath.substr(1));
             if (texIndex < (int)scene->mNumTextures) {
@@ -309,7 +385,6 @@ private:
             return -1;
         }
         
-        // External file
         std::string fullPath = baseDir + texPath;
         for (size_t i = 0; i < model.textures.size(); i++) {
             if (model.textures[i].path == fullPath) return (int)i;
@@ -331,12 +406,10 @@ private:
         int width, height, channels;
         
         if (tex->mHeight == 0) {
-            // Compressed
             data = stbi_load_from_memory(
                 reinterpret_cast<const unsigned char*>(tex->pcData),
                 tex->mWidth, &width, &height, &channels, 4);
         } else {
-            // Raw ARGB
             width = tex->mWidth;
             height = tex->mHeight;
             channels = 4;
@@ -402,7 +475,6 @@ private:
         
         vmaCreateImage(allocator, &imageInfo, &imgAllocInfo, &texture.image, &texture.allocation, nullptr);
         
-        // Transition and copy
         VkCommandBuffer cmd = beginSingleTimeCommands();
         
         VkImageMemoryBarrier barrier{};
@@ -444,7 +516,6 @@ private:
         
         vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
         
-        // Create view and sampler
         VkImageViewCreateInfo viewInfo{};
         viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         viewInfo.image = texture.image;
@@ -491,7 +562,7 @@ private:
         submesh.indexOffset = (uint32_t)model.indices.size();
         submesh.materialIndex = mesh->mMaterialIndex;
         
-        // Vertices - convert to simple format
+        // Create vertices
         for (unsigned int i = 0; i < mesh->mNumVertices; i++) {
             Vertex vertex{};
             
@@ -511,7 +582,62 @@ private:
                 vertex.texCoord = glm::vec2(0);
             }
             
+            if (mesh->HasVertexColors(0)) {
+                vertex.color = aiToGlm(mesh->mColors[0][i]);
+            } else {
+                vertex.color = glm::vec4(1.0f);
+            }
+            
+            // Initialize bone data
+            vertex.boneIds = glm::ivec4(-1);
+            vertex.boneWeights = glm::vec4(0.0f);
+            
             model.vertices.push_back(vertex);
+        }
+        
+        // Load bone weights
+        for (unsigned int b = 0; b < mesh->mNumBones; b++) {
+            aiBone* bone = mesh->mBones[b];
+            std::string boneName = bone->mName.C_Str();
+            
+            int boneIndex = -1;
+            auto it = model.boneMap.find(boneName);
+            if (it != model.boneMap.end()) {
+                boneIndex = it->second;
+            } else {
+                continue;
+            }
+            
+            for (unsigned int w = 0; w < bone->mNumWeights; w++) {
+                unsigned int vertexId = submesh.vertexOffset + bone->mWeights[w].mVertexId;
+                float weight = bone->mWeights[w].mWeight;
+                
+                if (vertexId >= model.vertices.size()) continue;
+                
+                Vertex& vertex = model.vertices[vertexId];
+                
+                // Find empty slot
+                for (int i = 0; i < 4; i++) {
+                    if (vertex.boneIds[i] < 0) {
+                        vertex.boneIds[i] = boneIndex;
+                        vertex.boneWeights[i] = weight;
+                        break;
+                    }
+                }
+            }
+        }
+        
+        // Normalize bone weights
+        for (uint32_t i = submesh.vertexOffset; i < model.vertices.size(); i++) {
+            Vertex& v = model.vertices[i];
+            float totalWeight = v.boneWeights.x + v.boneWeights.y + v.boneWeights.z + v.boneWeights.w;
+            if (totalWeight > 0.0f) {
+                v.boneWeights /= totalWeight;
+            } else {
+                // No bone influence - set to identity (bone 0 with weight 1)
+                v.boneIds = glm::ivec4(0, -1, -1, -1);
+                v.boneWeights = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
+            }
         }
         
         // Indices
@@ -523,47 +649,80 @@ private:
         }
         
         submesh.indexCount = (uint32_t)model.indices.size() - submesh.indexOffset;
-        
         model.submeshes.push_back(submesh);
     }
     
-    void loadAnimations(const aiScene* scene, Model& model) {
-        for (unsigned int i = 0; i < scene->mNumAnimations; i++) {
-            aiAnimation* anim = scene->mAnimations[i];
-            Animation animation;
-            animation.name = anim->mName.C_Str();
-            animation.duration = (float)anim->mDuration;
-            animation.ticksPerSecond = anim->mTicksPerSecond > 0 ? (float)anim->mTicksPerSecond : 25.0f;
+   void loadAnimations(const aiScene* scene, Model& model) {
+    for (unsigned int i = 0; i < scene->mNumAnimations; i++) {
+        aiAnimation* anim = scene->mAnimations[i];
+        Animation animation;
+        animation.name = anim->mName.C_Str();
+        animation.duration = (float)anim->mDuration;
+        animation.ticksPerSecond = anim->mTicksPerSecond > 0 ? (float)anim->mTicksPerSecond : 25.0f;
+        
+        // Temporary storage to combine split FBX channels
+        std::unordered_map<std::string, Animation::Channel> channelMap;
+        
+        for (unsigned int j = 0; j < anim->mNumChannels; j++) {
+            aiNodeAnim* nodeAnim = anim->mChannels[j];
+            std::string nodeName = nodeAnim->mNodeName.C_Str();
             
-            for (unsigned int j = 0; j < anim->mNumChannels; j++) {
-                aiNodeAnim* channel = anim->mChannels[j];
-                Animation::Channel ch;
-                ch.nodeName = channel->mNodeName.C_Str();
-                
-                for (unsigned int k = 0; k < channel->mNumPositionKeys; k++) {
-                    ch.positions.emplace_back((float)channel->mPositionKeys[k].mTime,
-                        aiToGlm(channel->mPositionKeys[k].mValue));
-                }
-                for (unsigned int k = 0; k < channel->mNumRotationKeys; k++) {
-                    ch.rotations.emplace_back((float)channel->mRotationKeys[k].mTime,
-                        aiToGlm(channel->mRotationKeys[k].mValue));
-                }
-                for (unsigned int k = 0; k < channel->mNumScalingKeys; k++) {
-                    ch.scales.emplace_back((float)channel->mScalingKeys[k].mTime,
-                        aiToGlm(channel->mScalingKeys[k].mValue));
-                }
-                
-                animation.channels.push_back(ch);
+            // Strip Assimp FBX suffixes
+            std::string baseName = nodeName;
+            std::string suffix;
+            size_t pos = nodeName.find("_$AssimpFbx$_");
+            if (pos != std::string::npos) {
+                baseName = nodeName.substr(0, pos);
+                suffix = nodeName.substr(pos + 13);
             }
             
-            model.animations.push_back(animation);
+            // Get or create channel for this bone
+            auto& ch = channelMap[baseName];
+            ch.nodeName = baseName;
+            
+            // Only add position keys if this is a Translation channel or regular channel
+            if (suffix.empty() || suffix == "Translation") {
+                for (unsigned int k = 0; k < nodeAnim->mNumPositionKeys; k++) {
+                    ch.positions.emplace_back(
+                        (float)nodeAnim->mPositionKeys[k].mTime,
+                        aiToGlm(nodeAnim->mPositionKeys[k].mValue)
+                    );
+                }
+            }
+            
+            // Only add rotation keys if this is a Rotation channel or regular channel
+            if (suffix.empty() || suffix == "Rotation") {
+                for (unsigned int k = 0; k < nodeAnim->mNumRotationKeys; k++) {
+                    ch.rotations.emplace_back(
+                        (float)nodeAnim->mRotationKeys[k].mTime,
+                        aiToGlm(nodeAnim->mRotationKeys[k].mValue)
+                    );
+                }
+            }
+            
+            // Only add scale keys if this is a Scaling channel or regular channel
+            if (suffix.empty() || suffix == "Scaling") {
+                for (unsigned int k = 0; k < nodeAnim->mNumScalingKeys; k++) {
+                    ch.scales.emplace_back(
+                        (float)nodeAnim->mScalingKeys[k].mTime,
+                        aiToGlm(nodeAnim->mScalingKeys[k].mValue)
+                    );
+                }
+            }
         }
+        
+        // Convert map to vector
+        for (auto& [name, ch] : channelMap) {
+            animation.channels.push_back(std::move(ch));
+        }
+        
+        model.animations.push_back(animation);
     }
+}
     
     void createBuffers(Model& model) {
         if (model.vertices.empty()) return;
         
-        // Vertex buffer
         VkDeviceSize vbSize = model.vertices.size() * sizeof(Vertex);
         VkBuffer stagingVB;
         VmaAllocation stagingVBAlloc;
@@ -587,7 +746,6 @@ private:
         allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
         vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &model.vertexBuffer, &model.vertexAllocation, nullptr);
         
-        // Index buffer
         VkDeviceSize ibSize = model.indices.size() * sizeof(uint32_t);
         VkBuffer stagingIB;
         VmaAllocation stagingIBAlloc;
@@ -605,7 +763,6 @@ private:
         allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
         vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &model.indexBuffer, &model.indexAllocation, nullptr);
         
-        // Copy
         VkCommandBuffer cmd = beginSingleTimeCommands();
         
         VkBufferCopy copyRegion{};
@@ -621,37 +778,41 @@ private:
         vmaDestroyBuffer(allocator, stagingIB, stagingIBAlloc);
     }
     
-    void createDescriptorSet(Model& model) {
-        VkDescriptorSetAllocateInfo allocInfo{};
-        allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-        allocInfo.descriptorPool = descriptorPool;
-        allocInfo.descriptorSetCount = 1;
-        allocInfo.pSetLayouts = &descriptorSetLayout;
-        vkAllocateDescriptorSets(device, &allocInfo, &model.descriptorSet);
-        
-        Texture* albedo = model.textures.empty() ? &defaultWhiteTexture : &model.textures[0];
-        
-        VkDescriptorImageInfo imageInfo{};
-        imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        imageInfo.imageView = albedo->view;
-        imageInfo.sampler = albedo->sampler;
-        
-        VkWriteDescriptorSet write{};
-        write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-        write.dstSet = model.descriptorSet;
-        write.dstBinding = 0;
-        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        write.descriptorCount = 1;
-        write.pImageInfo = &imageInfo;
-        
-        vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+   void createDescriptorSet(Model& model) {
+    VkDescriptorSetAllocateInfo allocInfo{};
+    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    allocInfo.descriptorPool = descriptorPool;
+    allocInfo.descriptorSetCount = 1;
+    allocInfo.pSetLayouts = &descriptorSetLayout;
+    vkAllocateDescriptorSets(device, &allocInfo, &model.descriptorSet);
+    
+    // Use first texture or default white
+    Texture* albedo = &defaultWhiteTexture;
+    if (!model.textures.empty() && model.textures[0].view != VK_NULL_HANDLE) {
+        albedo = &model.textures[0];
     }
+    
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    imageInfo.imageView = albedo->view;
+    imageInfo.sampler = albedo->sampler;
+    
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = model.descriptorSet;
+    write.dstBinding = 0;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.descriptorCount = 1;
+    write.pImageInfo = &imageInfo;
+    
+    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+}
     
     void createDefaultTextures() {
         uint32_t white = 0xFFFFFFFF;
         createTextureImage(reinterpret_cast<const unsigned char*>(&white), 1, 1, defaultWhiteTexture);
         
-        uint32_t normal = 0xFFFF8080; // (128, 128, 255, 255) = flat normal
+        uint32_t normal = 0xFFFF8080;
         createTextureImage(reinterpret_cast<const unsigned char*>(&normal), 1, 1, defaultNormalTexture);
     }
     

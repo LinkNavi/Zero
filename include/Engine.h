@@ -60,11 +60,11 @@ public:
         size--;
     }
 
-    T* get(EntityID entity) {
-        if (entityToIndex.find(entity) == entityToIndex.end())
-            return nullptr;
-        return &components[entityToIndex[entity]];
-    }
+ T* get(EntityID entity) {
+    auto it = entityToIndex.find(entity);
+    if (it == entityToIndex.end()) return nullptr;
+    return &components[it->second];
+}
 
     void entityDestroyed(EntityID entity) override {
         if (entityToIndex.find(entity) != entityToIndex.end())
@@ -145,10 +145,16 @@ void clear() {
         updateEntitySystems(entity);
     }
 
-    template<typename T>
-    T* getComponent(EntityID entity) {
-        return getComponentArray<T>()->get(entity);
-    }
+ template<typename T>
+T* getComponent(EntityID entity) {
+    std::type_index typeIdx(typeid(T));
+    auto it = componentArrays.find(typeIdx);
+    if (it == componentArrays.end()) return nullptr;
+    
+    auto* array = static_cast<TypedComponentArray<T>*>(it->second.get());
+    if (!array) return nullptr;
+    return array->get(entity);
+}
 
     template<typename T>
     std::shared_ptr<T> registerSystem() {

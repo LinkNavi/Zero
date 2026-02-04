@@ -13,24 +13,14 @@ PHASE 1: CORE RENDERING & UI
 
 PHASE 2: ANIMATION SYSTEM
 -------------------------
-[ ] Skeletal animation
-    [ ] Bone hierarchy loading
-    [ ] Skinning shader (GPU skinning)
-    [ ] Animation clip loading
-    [ ] Animation playback (play/pause/stop)
-    [ ] Animation blending
-    [ ] Animation state machine
-    [ ] Root motion support
-
-[ ] Procedural animation
-    [ ] IK (inverse kinematics)
-    [ ] Look-at constraints
-    [ ] Procedural walk cycles
-
-[ ] Animation tools
-    [ ] Timeline scrubbing in editor
-    [ ] Animation preview
-    [ ] Blend tree visualization
+[x] Skeletal animation
+    [x] Bone hierarchy loading
+    [x] Skinning shader (GPU skinning)
+    [x] Animation clip loading
+    [x] Animation playback (play/pause/stop)
+    [x] Animation blending
+    [x] Animation state machine
+    [x] Root motion support
 
 PHASE 3: VISUAL POLISH
 ----------------------

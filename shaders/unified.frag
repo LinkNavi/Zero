@@ -10,6 +10,7 @@ layout(set = 0, binding = 0) uniform sampler2D texSampler;
 
 layout(push_constant) uniform PushConstants {
     mat4 viewProj;
+    mat4 model;
     vec3 lightDir;
     float ambientStrength;
     vec3 lightColor;
@@ -17,12 +18,11 @@ layout(push_constant) uniform PushConstants {
 } pc;
 
 void main() {
-    // Sample texture only once
     vec4 texColor = texture(texSampler, fragTexCoord);
     
-    // Fast half-lambert for softer lighting without normalize
-    float NdotL = dot(fragNormal, pc.lightDir) * 0.5 + 0.5;
+    vec3 normal = normalize(fragNormal);
+    float NdotL = dot(normal, -pc.lightDir) * 0.5 + 0.5;
     float light = pc.ambientStrength + NdotL * (1.0 - pc.ambientStrength);
     
-    outColor = vec4(texColor.rgb * fragColor.rgb * light * pc.lightColor, 1.0);
+    outColor = vec4(texColor.rgb * fragColor.rgb * light * pc.lightColor, texColor.a);
 }

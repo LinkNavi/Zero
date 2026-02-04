@@ -9,7 +9,8 @@ enum class Key {
     Space, Shift, Ctrl,
     Up, Down, Left, Right,
     Escape,
-    Mouse1, Mouse2, Mouse3
+    Mouse1, Mouse2, Mouse3,
+Num1, Num2, Num3,
 };
 
 class Input {
@@ -47,7 +48,11 @@ public:
         keys[Key::Escape] = false;
         keys[Key::Mouse1] = false;
         keys[Key::Mouse2] = false;
+
         keys[Key::Mouse3] = false;
+        keys[Key::Num1] = false;
+        keys[Key::Num2] = false;
+        keys[Key::Num3] = false;
         
         keysLastFrame = keys;
     }
@@ -104,7 +109,11 @@ private:
             case GLFW_KEY_DOWN: keys[Key::Down] = pressed; break;
             case GLFW_KEY_LEFT: keys[Key::Left] = pressed; break;
             case GLFW_KEY_RIGHT: keys[Key::Right] = pressed; break;
+
             case GLFW_KEY_ESCAPE: keys[Key::Escape] = pressed; break;
+            case GLFW_KEY_1: keys[Key::Num1] = pressed; break;
+            case GLFW_KEY_2: keys[Key::Num2] = pressed; break;
+            case GLFW_KEY_3: keys[Key::Num3] = pressed; break;
         }
     }
     

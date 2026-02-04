@@ -126,57 +126,46 @@ public:
 
 private:
     // Serialize a single entity to binary format
-    static std::vector<uint8_t> serializeEntity(ECS* ecs, EntityID id) {
-        std::vector<uint8_t> data;
-        
-        // Component presence flags (1 byte)
-        uint8_t flags = 0;
-        if (ecs->getComponent<Transform>(id)) flags |= 0x01;
-        if (ecs->getComponent<Tag>(id)) flags |= 0x02;
-        if (ecs->getComponent<Layer>(id)) flags |= 0x04;
-        if (ecs->getComponent<RigidBody>(id)) flags |= 0x08;
-        if (ecs->getComponent<Collider>(id)) flags |= 0x10;
-        
-        data.push_back(flags);
-        
-        // Serialize Transform
-        if (auto* t = ecs->getComponent<Transform>(id)) {
-            writeBytes(data, t->position);
-            writeBytes(data, t->rotation);
-            writeBytes(data, t->scale);
-            writeBytes(data, t->parent);
-        }
-        
-        // Serialize Tag
-        if (auto* tag = ecs->getComponent<Tag>(id)) {
-            writeString(data, tag->name);
-        }
-        
-        // Serialize Layer
-        if (auto* layer = ecs->getComponent<Layer>(id)) {
-            writeBytes(data, layer->mask);
-        }
-        
-        // Serialize RigidBody
-        if (auto* rb = ecs->getComponent<RigidBody>(id)) {
-            writeBytes(data, rb->velocity);
-            writeBytes(data, rb->angularVelocity);
-            writeBytes(data, rb->mass);
-            writeBytes(data, rb->drag);
-            writeBytes(data, rb->useGravity);
-            writeBytes(data, rb->isKinematic);
-        }
-        
-        // Serialize Collider
-        if (auto* col = ecs->getComponent<Collider>(id)) {
-            writeBytes(data, static_cast<uint8_t>(col->type));
-            writeBytes(data, col->size);
-            writeBytes(data, col->radius);
-            writeBytes(data, col->isTrigger);
-        }
-        
-        return data;
+   static std::vector<uint8_t> serializeEntity(ECS* ecs, EntityID id) {
+    std::vector<uint8_t> data;
+    
+    // Only check components that are actually registered
+    auto* transform = ecs->getComponent<Transform>(id);
+    auto* tag = ecs->getComponent<Tag>(id);
+    auto* layer = ecs->getComponent<Layer>(id);
+    
+    // Component presence flags (1 byte)
+    uint8_t flags = 0;
+    if (transform) flags |= 0x01;
+    if (tag) flags |= 0x02;
+    if (layer) flags |= 0x04;
+    // Skip RigidBody and Collider if not registered
+    // flags |= 0x08 and 0x10 only if physics is enabled
+    
+    data.push_back(flags);
+    
+    // Serialize Transform
+    if (transform) {
+        writeBytes(data, transform->position);
+        writeBytes(data, transform->rotation);
+        writeBytes(data, transform->scale);
+        writeBytes(data, transform->parent);
     }
+    
+    // Serialize Tag
+    if (tag) {
+        writeString(data, tag->name);
+    }
+    
+    // Serialize Layer
+    if (layer) {
+        writeBytes(data, layer->mask);
+    }
+    
+    // RigidBody and Collider serialization removed - add back when physics is registered
+    
+    return data;
+}
     
     // Deserialize a single entity from binary format
     static bool deserializeEntity(ECS* ecs, const std::vector<uint8_t>& data) {
