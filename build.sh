@@ -119,8 +119,8 @@ build_project() {
     
     info "Building ($mode)..."
 
-    if command -v zora &>/dev/null; then
-        zora build
+    if command -v Zora &>/dev/null; then
+        Zora build
     elif [ -f CMakeLists.txt ]; then
         mkdir -p build && cd build
         cmake .. -DCMAKE_BUILD_TYPE=Release

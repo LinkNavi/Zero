@@ -1,5 +1,4 @@
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb_image.h>
+
 
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
@@ -367,14 +366,14 @@ if (!skybox.init(renderer.getDevice(), renderer.getAllocator(), g_descriptorPool
         vkCmdSetViewport(cmd, 0, 1, &viewport);
         VkRect2D scissor{{0, 0}, {renderer.getWidth(), renderer.getHeight()}};
         vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-        // Render scene
-        if (auto* duck = dynamic_cast<DuckScene*>(sceneManager.getCurrentScene())) {
-            duck->render(cmd);
-        } else if (auto* walk = dynamic_cast<WalkingScene*>(sceneManager.getCurrentScene())) {
-            walk->render(cmd);
-        }
 skybox.render(cmd, camera.getViewMatrix(), camera.getProjectionMatrix());
+
+// Then render scene
+if (auto* duck = dynamic_cast<DuckScene*>(sceneManager.getCurrentScene())) {
+    duck->render(cmd);
+} else if (auto* walk = dynamic_cast<WalkingScene*>(sceneManager.getCurrentScene())) {
+    walk->render(cmd);
+}
         // UI
         if (showUI) {
             renderer.imguiNewFrame();

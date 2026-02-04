@@ -1,4 +1,3 @@
-
 // include/Skybox.h
 #pragma once
 #include <vulkan/vulkan.h>
@@ -9,12 +8,13 @@
 #include <vector>
 #include <iostream>
 #include <string>
-
 #include <stb_image.h>
 
 class Skybox {
     VkDevice device = VK_NULL_HANDLE;
     VmaAllocator allocator = nullptr;
+    VkCommandPool commandPool = VK_NULL_HANDLE;
+    VkQueue queue = VK_NULL_HANDLE;
     
     VkPipeline pipeline = VK_NULL_HANDLE;
     VkPipelineLayout layout = VK_NULL_HANDLE;
@@ -40,22 +40,41 @@ class Skybox {
     
 public:
     bool init(VkDevice dev, VmaAllocator alloc, VkDescriptorPool pool, VkRenderPass renderPass,
-              VkCommandPool cmdPool, VkQueue queue, const std::string& vertPath, const std::string& fragPath,
+              VkCommandPool cmdPool, VkQueue q, const std::string& vertPath, const std::string& fragPath,
               const std::vector<std::string>& facesPaths) {
         device = dev;
         allocator = alloc;
+        commandPool = cmdPool;
+        queue = q;
         
-        if (!createCubemap(cmdPool, queue, facesPaths)) return false;
-        if (!createVertexBuffer()) return false;
-        if (!createUniformBuffer()) return false;
-        if (!createDescriptors(pool)) return false;
-        if (!createPipeline(renderPass, vertPath, fragPath)) return false;
+        if (!createCubemap(facesPaths)) {
+            std::cerr << "Failed to create cubemap\n";
+            return false;
+        }
+        if (!createVertexBuffer()) {
+            std::cerr << "Failed to create vertex buffer\n";
+            return false;
+        }
+        if (!createUniformBuffer()) {
+            std::cerr << "Failed to create uniform buffer\n";
+            return false;
+        }
+        if (!createDescriptors(pool)) {
+            std::cerr << "Failed to create descriptors\n";
+            return false;
+        }
+        if (!createPipeline(renderPass, vertPath, fragPath)) {
+            std::cerr << "Failed to create pipeline\n";
+            return false;
+        }
         
         std::cout << "✓ Skybox initialized\n";
         return true;
     }
     
     void render(VkCommandBuffer cmd, const glm::mat4& view, const glm::mat4& proj) {
+        if (pipeline == VK_NULL_HANDLE || vertexBuffer == VK_NULL_HANDLE) return;
+        
         // Remove translation from view matrix
         glm::mat4 viewNoTranslation = glm::mat4(glm::mat3(view));
         
@@ -82,18 +101,20 @@ public:
     }
     
 private:
-    bool createCubemap(VkCommandPool cmdPool, VkQueue queue, const std::vector<std::string>& faces) {
+    bool createCubemap(const std::vector<std::string>& faces) {
         if (faces.size() != 6) {
             std::cerr << "Skybox needs 6 faces\n";
             return false;
         }
-        
+        stbi_set_flip_vertically_on_load(false);
         int width, height, channels;
         stbi_uc* pixels = stbi_load(faces[0].c_str(), &width, &height, &channels, 4);
         if (!pixels) {
             std::cerr << "Failed to load skybox face: " << faces[0] << "\n";
             return false;
         }
+        
+        std::cout << "Loaded skybox face: " << faces[0] << " (" << width << "x" << height << ")\n";
         
         VkDeviceSize layerSize = width * height * 4;
         VkDeviceSize imageSize = layerSize * 6;
@@ -107,7 +128,10 @@ private:
         
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
-        vmaCreateBuffer(allocator, &bufInfo, &allocInfo, &stagingBuffer, &stagingAlloc, nullptr);
+        if (vmaCreateBuffer(allocator, &bufInfo, &allocInfo, &stagingBuffer, &stagingAlloc, nullptr) != VK_SUCCESS) {
+            stbi_image_free(pixels);
+            return false;
+        }
         
         void* data;
         vmaMapMemory(allocator, stagingAlloc, &data);
@@ -133,7 +157,7 @@ private:
         // Create cubemap image
         VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         imgInfo.imageType = VK_IMAGE_TYPE_2D;
-        imgInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+       imgInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
         imgInfo.extent = {(uint32_t)width, (uint32_t)height, 1};
         imgInfo.mipLevels = 1;
         imgInfo.arrayLayers = 6;
@@ -144,10 +168,13 @@ private:
         
         VmaAllocationCreateInfo imgAllocInfo{};
         imgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-        vmaCreateImage(allocator, &imgInfo, &imgAllocInfo, &cubemapImage, &cubemapAlloc, nullptr);
+        if (vmaCreateImage(allocator, &imgInfo, &imgAllocInfo, &cubemapImage, &cubemapAlloc, nullptr) != VK_SUCCESS) {
+            vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
+            return false;
+        }
         
         // Copy buffer to image
-        VkCommandBuffer cmd = beginSingleTimeCommands(cmdPool);
+        VkCommandBuffer cmd = beginSingleTimeCommands();
         
         VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         barrier.image = cubemapImage;
@@ -169,16 +196,18 @@ private:
         barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0, nullptr, 1, &barrier);
         
-        endSingleTimeCommands(cmd, cmdPool, queue);
+        endSingleTimeCommands(cmd);
         vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
         
         // Image view
         VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         viewInfo.image = cubemapImage;
         viewInfo.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
-        viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+       viewInfo.format = VK_FORMAT_R8G8B8A8_UNORM;
         viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6};
-        vkCreateImageView(device, &viewInfo, nullptr, &cubemapView);
+        if (vkCreateImageView(device, &viewInfo, nullptr, &cubemapView) != VK_SUCCESS) {
+            return false;
+        }
         
         // Sampler
         VkSamplerCreateInfo samplerInfo{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
@@ -188,27 +217,27 @@ private:
         samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         samplerInfo.maxLod = 1.0f;
-        vkCreateSampler(device, &samplerInfo, nullptr, &cubemapSampler);
+        if (vkCreateSampler(device, &samplerInfo, nullptr, &cubemapSampler) != VK_SUCCESS) {
+            return false;
+        }
         
         return true;
     }
     
-    bool createVertexBuffer() {
-        float vertices[] = {
-            -1,-1,-1,  1,-1,-1,  1,1,-1, -1,1,-1,  // Back
-            -1,-1,1,  -1,1,1,  1,1,1,  1,-1,1,      // Front
-            -1,1,-1,  -1,1,1,  1,1,1,  1,1,-1,      // Top
-            -1,-1,-1,  1,-1,-1,  1,-1,1,  -1,-1,1,  // Bottom
-            -1,-1,-1,  -1,-1,1,  -1,1,1,  -1,1,-1,  // Left
-            1,-1,-1,  1,1,-1,  1,1,1,  1,-1,1       // Right
-        };
-        
-        uint16_t indices[] = {
-            0,1,2, 2,3,0,  4,5,6, 6,7,4,  8,9,10, 10,11,8,
-            12,13,14, 14,15,12,  16,17,18, 18,19,16,  20,21,22, 22,23,20
-        };
+   bool createVertexBuffer() {
+    // Scale up the cube - was -1 to 1, now -100 to 100
+    float vertices[] = {
+        -100,-100,-100,  100,-100,-100,  100,100,-100,  100,100,-100,  -100,100,-100,  -100,-100,-100,
+        -100,-100,100,  -100,100,100,  100,100,100,  100,100,100,  100,-100,100,  -100,-100,100,
+        -100,100,-100,  -100,100,100,  100,100,100,  100,100,100,  100,100,-100,  -100,100,-100,
+        -100,-100,-100,  100,-100,-100,  100,-100,100,  100,-100,100,  -100,-100,100,  -100,-100,-100,
+        -100,-100,-100,  -100,-100,100,  -100,100,100,  -100,100,100,  -100,100,-100,  -100,-100,-100,
+        100,-100,-100,  100,100,-100,  100,100,100,  100,100,100,  100,-100,100,  100,-100,-100
+    };
         
         VkDeviceSize bufSize = sizeof(vertices);
+        
+        // Create staging buffer
         VkBuffer stagingBuffer;
         VmaAllocation stagingAlloc;
         
@@ -218,19 +247,32 @@ private:
         
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
-        vmaCreateBuffer(allocator, &bufInfo, &allocInfo, &stagingBuffer, &stagingAlloc, nullptr);
+        if (vmaCreateBuffer(allocator, &bufInfo, &allocInfo, &stagingBuffer, &stagingAlloc, nullptr) != VK_SUCCESS) {
+            return false;
+        }
         
+        // Copy data to staging
         void* data;
         vmaMapMemory(allocator, stagingAlloc, &data);
         memcpy(data, vertices, bufSize);
         vmaUnmapMemory(allocator, stagingAlloc);
         
+        // Create vertex buffer
         bufInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
         VmaAllocationCreateInfo vbAllocInfo{};
         vbAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-        vmaCreateBuffer(allocator, &bufInfo, &vbAllocInfo, &vertexBuffer, &vertexAlloc, nullptr);
+        if (vmaCreateBuffer(allocator, &bufInfo, &vbAllocInfo, &vertexBuffer, &vertexAlloc, nullptr) != VK_SUCCESS) {
+            vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
+            return false;
+        }
         
-        // Copy is omitted for brevity - in real code you'd do a staging copy here
+        // Copy staging to vertex buffer
+        VkCommandBuffer cmd = beginSingleTimeCommands();
+        VkBufferCopy copyRegion{};
+        copyRegion.size = bufSize;
+        vkCmdCopyBuffer(cmd, stagingBuffer, vertexBuffer, 1, &copyRegion);
+        endSingleTimeCommands(cmd);
+        
         vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
         return true;
     }
@@ -242,8 +284,13 @@ private:
         
         VmaAllocationCreateInfo allocInfo{};
         allocInfo.usage = VMA_MEMORY_USAGE_CPU_TO_GPU;
-        vmaCreateBuffer(allocator, &bufInfo, &allocInfo, &uniformBuffer, &uniformAlloc, nullptr);
-        vmaMapMemory(allocator, uniformAlloc, &uniformMapped);
+        allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+        
+        VmaAllocationInfo allocationInfo;
+        if (vmaCreateBuffer(allocator, &bufInfo, &allocInfo, &uniformBuffer, &uniformAlloc, &allocationInfo) != VK_SUCCESS) {
+            return false;
+        }
+        uniformMapped = allocationInfo.pMappedData;
         return true;
     }
     
@@ -262,13 +309,17 @@ private:
         VkDescriptorSetLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
         layoutInfo.bindingCount = 2;
         layoutInfo.pBindings = bindings;
-        vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descLayout);
+        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &descLayout) != VK_SUCCESS) {
+            return false;
+        }
         
         VkDescriptorSetAllocateInfo allocInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         allocInfo.descriptorPool = pool;
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &descLayout;
-        vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet);
+        if (vkAllocateDescriptorSets(device, &allocInfo, &descriptorSet) != VK_SUCCESS) {
+            return false;
+        }
         
         VkDescriptorBufferInfo bufInfo{uniformBuffer, 0, sizeof(UBO)};
         VkDescriptorImageInfo imgInfo{cubemapSampler, cubemapView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
@@ -293,8 +344,16 @@ private:
     }
     
     bool createPipeline(VkRenderPass renderPass, const std::string& vertPath, const std::string& fragPath) {
-        auto vertCode = readFile(vertPath);
-        auto fragCode = readFile(fragPath);
+         auto vertCode = readFile(vertPath);
+    auto fragCode = readFile(fragPath);
+    if (vertCode.empty()) {
+        std::cerr << "Failed to read vertex shader: " << vertPath << "\n";
+        return false;
+    }
+    if (fragCode.empty()) {
+        std::cerr << "Failed to read fragment shader: " << fragPath << "\n";
+        return false;
+    }
         if (vertCode.empty() || fragCode.empty()) return false;
         
         VkShaderModule vertModule = createShaderModule(vertCode);
@@ -338,7 +397,7 @@ private:
         VkPipelineDepthStencilStateCreateInfo depthStencil{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
         depthStencil.depthTestEnable = VK_TRUE;
         depthStencil.depthWriteEnable = VK_FALSE;
-        depthStencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+       depthStencil.depthCompareOp = VK_COMPARE_OP_ALWAYS;
         
         VkPipelineColorBlendAttachmentState colorBlendAttachment{};
         colorBlendAttachment.colorWriteMask = 0xF;
@@ -355,7 +414,11 @@ private:
         VkPipelineLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
         layoutInfo.setLayoutCount = 1;
         layoutInfo.pSetLayouts = &descLayout;
-        vkCreatePipelineLayout(device, &layoutInfo, nullptr, &layout);
+        if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &layout) != VK_SUCCESS) {
+            vkDestroyShaderModule(device, vertModule, nullptr);
+            vkDestroyShaderModule(device, fragModule, nullptr);
+            return false;
+        }
         
         VkGraphicsPipelineCreateInfo pipelineInfo{VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
         pipelineInfo.stageCount = 2;
@@ -379,9 +442,9 @@ private:
         return result == VK_SUCCESS;
     }
     
-    VkCommandBuffer beginSingleTimeCommands(VkCommandPool pool) {
+    VkCommandBuffer beginSingleTimeCommands() {
         VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-        allocInfo.commandPool = pool;
+        allocInfo.commandPool = commandPool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         allocInfo.commandBufferCount = 1;
         VkCommandBuffer cmd;
@@ -392,14 +455,14 @@ private:
         return cmd;
     }
     
-    void endSingleTimeCommands(VkCommandBuffer cmd, VkCommandPool pool, VkQueue queue) {
+    void endSingleTimeCommands(VkCommandBuffer cmd) {
         vkEndCommandBuffer(cmd);
         VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         submitInfo.commandBufferCount = 1;
         submitInfo.pCommandBuffers = &cmd;
         vkQueueSubmit(queue, 1, &submitInfo, VK_NULL_HANDLE);
         vkQueueWaitIdle(queue);
-        vkFreeCommandBuffers(device, pool, 1, &cmd);
+        vkFreeCommandBuffers(device, commandPool, 1, &cmd);
     }
     
     std::vector<char> readFile(const std::string& path) {
