@@ -10,8 +10,8 @@
 #include "tags.h"
 #include "Config.h"
 #include "ResourcePath.h"
-#include "ImGuiLayer.h"
-#include "DebugUI.h"
+
+
 #include <iostream>
 
 ECS* g_ecs = nullptr;
@@ -148,24 +148,7 @@ int main() {
     
     Model cube = modelLoader.load(ResourcePath::models("Duck.glb"));
     
-    // ImGui setup
-    ImGuiLayer imgui;
-    uint32_t queueFamily = 0; // Assuming graphics queue family 0
- if (!imgui.init(renderer.getWindow(), 
-                renderer.getInstance(),  // ← Fixed!
-                renderer.getPhysicalDevice(),
-                renderer.getDevice(),
-                queueFamily,
-                renderer.getGraphicsQueue(),
-                2)) {
-    std::cerr << "Failed to init ImGui\n";
-    return -1;
-}
-//    imgui.uploadFonts(renderer.getCommandPool(), renderer.getGraphicsQueue())
-    std::cout << "✓ ImGui initialized\n";
-    
-    DebugUI debugUI;
-    
+      
     // ECS setup
     ECS ecs;
     g_ecs = &ecs;
@@ -236,14 +219,7 @@ int main() {
         // Update systems
         renderSystem->update(dt);
         
-        // ImGui frame
-        imgui.newFrame();
-        
-        if (showUI) {
-            debugUI.render(&ecs, &camera, entityCount, renderSystem->draw_calls);
-        }
-        
-        // Render
+    
         VkCommandBuffer cmd;
         renderer.beginFrame(cmd);
         
@@ -261,7 +237,7 @@ int main() {
         renderSystem->render(cmd);
         
         // Render ImGui
-        imgui.render(cmd);
+
         
         renderer.endFrame(cmd);
         Input::update();
@@ -271,7 +247,7 @@ int main() {
     std::cout << "\nCleaning up...\n";
     vkDeviceWaitIdle(renderer.getDevice());
     
-    imgui.cleanup(renderer.getDevice());
+
     renderSystem->instanceBuffer.cleanup();
     modelLoader.cleanup(cube);
     modelLoader.cleanupLoader();
