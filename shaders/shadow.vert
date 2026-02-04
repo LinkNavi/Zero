@@ -7,29 +7,17 @@ layout(location = 3) in vec4 inColor;
 layout(location = 4) in ivec4 inBoneIds;
 layout(location = 5) in vec4 inBoneWeights;
 
-layout(location = 0) out vec2 fragTexCoord;
-layout(location = 1) out vec3 fragNormal;
-layout(location = 2) out vec4 fragColor;
-layout(location = 3) out vec4 fragLightSpacePos;
-layout(location = 4) out vec3 fragWorldPos;
-
 layout(set = 0, binding = 1) uniform BoneBuffer {
     mat4 bones[128];
 };
 
 layout(push_constant) uniform PushConstants {
-    mat4 viewProj;
-    mat4 model;
     mat4 lightViewProj;
-    vec3 lightDir;
-    float ambientStrength;
-    vec3 lightColor;
-    float shadowBias;
+    mat4 model;
 };
 
 void main() {
     vec4 pos = vec4(inPosition, 1.0);
-    vec4 norm = vec4(inNormal, 0.0);
     
     float totalWeight = inBoneWeights.x + inBoneWeights.y + inBoneWeights.z + inBoneWeights.w;
     if (totalWeight > 0.01) {
@@ -39,15 +27,7 @@ void main() {
             bones[inBoneIds.z] * inBoneWeights.z +
             bones[inBoneIds.w] * inBoneWeights.w;
         pos = skinMatrix * pos;
-        norm = skinMatrix * norm;
     }
     
-    vec4 worldPos = model * pos;
-    fragWorldPos = worldPos.xyz;
-    fragTexCoord = inTexCoord;
-    fragNormal = normalize(mat3(model) * norm.xyz);
-    fragColor = inColor;
-    fragLightSpacePos = lightViewProj * worldPos;
-    
-    gl_Position = viewProj * worldPos;
+    gl_Position = lightViewProj * model * pos;
 }
