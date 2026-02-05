@@ -1,3 +1,4 @@
+#include "imgui.h"
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 
@@ -39,6 +40,7 @@ static float fogColor[3] = {0.5f, 0.6f, 0.7f};
 static bool exponentialFog = false;
 static float emissionStrength = 0.0f;
 
+
 // Point lights
 static PointLight pointLights[4] = {
     {{5.0f, 2.0f, 0.0f}, 15.0f, {1.0f, 0.3f, 0.1f}, 10.0f},
@@ -54,6 +56,7 @@ class DuckScene : public Scene {
 public:
   Model duckModel;
   std::vector<Renderable> ducks;
+
   int gridSize = 4;
   float spacing = 4.0f;
   float rotationSpeed = 30.0f;
@@ -151,7 +154,28 @@ public:
       vkCmdDrawIndexed(cmd, duck.model->totalIndices, 1, 0, 0, 0);
     }
   }
+void rebuildGrid() {
+  for (auto &d : ducks)
+    d.cleanup();
+  ducks.clear();
 
+  float offset = (gridSize - 1) * spacing * 0.5f;
+
+  for (int x = 0; x < gridSize; x++) {
+    for (int z = 0; z < gridSize; z++) {
+      Renderable r;
+      r.init(&duckModel, g_renderer->getAllocator(), g_renderer->getDevice(),
+             g_modelLoader->getDefaultWhite(),
+             g_pipeline->getDescriptorLayout(), g_shadowMap,
+             g_shadowMap->descLayout);
+      r.transform =
+          glm::translate(glm::mat4(1), glm::vec3(x * spacing - offset, 0,
+                                                 z * spacing - offset));
+      r.transform = glm::scale(r.transform, glm::vec3(0.5f));
+      ducks.push_back(std::move(r));
+    }
+  }
+}
   void onUnload() override {
     for (auto &d : ducks)
       d.cleanup();
@@ -269,14 +293,14 @@ int main() {
   g_camera = &camera;
 
   // Descriptor pool
-  VkDescriptorPoolSize poolSizes[] = {
-      {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 400},
-      {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 400}};
-  VkDescriptorPoolCreateInfo poolInfo{};
-  poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  poolInfo.poolSizeCount = 2;
-  poolInfo.pPoolSizes = poolSizes;
-  poolInfo.maxSets = 400;
+VkDescriptorPoolSize poolSizes[] = {
+    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 50000},
+    {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 50000}};
+VkDescriptorPoolCreateInfo poolInfo{};
+poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+poolInfo.poolSizeCount = 2;
+poolInfo.pPoolSizes = poolSizes;
+poolInfo.maxSets = 50000;
   poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
   vkCreateDescriptorPool(renderer.getDevice(), &poolInfo, nullptr,
                          &g_descriptorPool);
@@ -443,8 +467,32 @@ int main() {
         sceneManager.loadScene("WalkingScene");
       }
 
+			ImGui::Separator();
+
+      
+if (auto *duck = dynamic_cast<DuckScene *>(scene)) {
+  ImGui::Text("Ducks: %zu", duck->ducks.size());
+  ImGui::Checkbox("Auto Rotate", &duck->autoRotate);
+  if (duck->autoRotate)
+    ImGui::SliderFloat("Speed", &duck->rotationSpeed, 0, 360);
+  
+  // Grid controls
+  static int newGridSize = duck->gridSize;
+  static float newSpacing = duck->spacing;
+  
+  ImGui::SliderInt("Grid Size", &newGridSize, 1, 100);
+  ImGui::SliderFloat("Spacing", &newSpacing, 1.0f, 10.0f);
+  
+  if (ImGui::Button("Rebuild Grid")) {
+    duck->gridSize = newGridSize;
+    duck->spacing = newSpacing;
+    duck->rebuildGrid();
+  }
+}
+
       ImGui::Separator();
       ImGui::Text("Shadow Settings");
+
       ImGui::SliderFloat("Bias", &shadowMap.bias, 0.0001f, 0.01f, "%.4f");
       ImGui::SliderFloat("Ortho Size", &shadowMap.orthoSize, 5.0f, 50.0f);
 
