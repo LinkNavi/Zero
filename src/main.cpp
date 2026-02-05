@@ -293,20 +293,23 @@ int main() {
   }
   g_shadowMap = &shadowMap;
 
-  // Main pipeline
+  // Post processing (must init before pipeline to get scene render pass)
+  if (!g_postProcess.init(renderer.getDevice(), renderer.getAllocator(), g_descriptorPool,
+                     renderer.getWidth(), renderer.getHeight(),
+                     VK_FORMAT_D32_SFLOAT,
+                     ResourcePath::shaders("fullscreen_vert.spv"),
+                     ResourcePath::shaders("bloom_frag.spv"),
+                     ResourcePath::shaders("composite_frag.spv"))) {
+    std::cerr << "Failed to init post processing\n";
+    return -1;
+  }
+
+  // Main pipeline - use post process scene render pass for HDR output
   Pipeline pipeline;
-  pipeline.init(renderer.getDevice(), renderer.getRenderPass(),
+  pipeline.init(renderer.getDevice(), g_postProcess.getSceneRenderPass(),
                 ResourcePath::shaders("unified_vert.spv"),
                 ResourcePath::shaders("unified_frag.spv"));
   g_pipeline = &pipeline;
-
-  // Post processing (bloom) - optional, uses swapchain directly
-  g_postProcess.init(renderer.getDevice(), renderer.getAllocator(), g_descriptorPool,
-                     renderer.getWidth(), renderer.getHeight(),
-                     ResourcePath::shaders("fullscreen_vert.spv"),
-                     ResourcePath::shaders("bloom_frag.spv"),
-                     ResourcePath::shaders("composite_frag.spv"),
-                     renderer.getRenderPass());
 
   // Model loader
   ModelLoader modelLoader;
@@ -315,7 +318,7 @@ int main() {
                    g_descriptorPool, pipeline.getDescriptorLayout());
   g_modelLoader = &modelLoader;
 
-  // Skybox
+  // Skybox - also renders to HDR scene target
   std::vector<std::string> skyboxFaces = {
       ResourcePath::textures("skybox/right.jpg"),
       ResourcePath::textures("skybox/left.jpg"),
@@ -325,7 +328,7 @@ int main() {
       ResourcePath::textures("skybox/back.jpg")
   };
   if (!skybox.init(renderer.getDevice(), renderer.getAllocator(),
-                   g_descriptorPool, renderer.getRenderPass(),
+                   g_descriptorPool, g_postProcess.getSceneRenderPass(),
                    renderer.getCommandPool(), renderer.getGraphicsQueue(),
                    ResourcePath::shaders("skybox_vert.spv"),
                    ResourcePath::shaders("skybox_frag.spv"), skyboxFaces)) {
@@ -397,25 +400,12 @@ int main() {
 
     shadowMap.endShadowPass(cmd);
 
-    // ===== SCENE PASS =====
-    VkRenderPassBeginInfo rpInfo{};
-    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    rpInfo.renderPass = renderer.getRenderPass();
-    rpInfo.framebuffer = renderer.getCurrentFramebuffer();
-    rpInfo.renderArea.extent = {renderer.getWidth(), renderer.getHeight()};
-
+    // ===== SCENE PASS (renders to HDR offscreen target) =====
     std::array<VkClearValue, 2> clearValues{};
     clearValues[0].color = {{0.05f, 0.05f, 0.08f, 1.0f}};
     clearValues[1].depthStencil = {1.0f, 0};
-    rpInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
-    rpInfo.pClearValues = clearValues.data();
-
-    vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-    VkViewport viewport{0, 0, float(renderer.getWidth()), float(renderer.getHeight()), 0, 1};
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-    VkRect2D scissor{{0, 0}, {renderer.getWidth(), renderer.getHeight()}};
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
+    
+    g_postProcess.beginScenePass(cmd, clearValues);
 
     // Render skybox first
     skybox.render(cmd, camera.getViewMatrix(), camera.getProjectionMatrix());
@@ -427,30 +417,14 @@ int main() {
       walk->render(cmd);
     }
 
-    vkCmdEndRenderPass(cmd);
+    g_postProcess.endScenePass(cmd);
 
-    // ===== BLOOM (optional, only if enabled) =====
-    if (g_postProcess.settings.bloom.enabled) {
-      // Get current swapchain image for copy
-      g_postProcess.apply(cmd, renderer.getCurrentSwapchainImage(), 
-                          renderer.getRenderPass(), renderer.getCurrentFramebuffer());
-    }
+    // ===== POST PROCESS (bloom + composite to swapchain) =====
+    // This starts a new render pass on swapchain and leaves it open for UI
+    g_postProcess.applyPostProcess(cmd, renderer.getRenderPass(), renderer.getCurrentFramebuffer());
 
-    // ===== UI (new render pass) =====
+    // ===== UI (continues in swapchain render pass) =====
     if (showUI) {
-      VkRenderPassBeginInfo uiRpInfo{};
-      uiRpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      uiRpInfo.renderPass = renderer.getRenderPass();
-      uiRpInfo.framebuffer = renderer.getCurrentFramebuffer();
-      uiRpInfo.renderArea.extent = {renderer.getWidth(), renderer.getHeight()};
-      // Don't clear for UI pass
-      uiRpInfo.clearValueCount = 0;
-      
-      vkCmdBeginRenderPass(cmd, &uiRpInfo, VK_SUBPASS_CONTENTS_INLINE);
-      
-      vkCmdSetViewport(cmd, 0, 1, &viewport);
-      vkCmdSetScissor(cmd, 0, 1, &scissor);
-
       renderer.imguiNewFrame();
       ImGui::Begin("Debug");
       ImGui::Text("FPS: %.1f (%.2f ms)", displayFps, displayFrameTime);
@@ -588,9 +562,10 @@ int main() {
 
       ImGui::End();
       renderer.imguiRender(cmd);
-      
-      vkCmdEndRenderPass(cmd);
     }
+    
+    // End swapchain render pass
+    vkCmdEndRenderPass(cmd);
     
     renderer.endFrame(cmd);
     Input::update();

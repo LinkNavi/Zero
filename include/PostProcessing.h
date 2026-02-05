@@ -5,7 +5,6 @@
 #include <fstream>
 #include <vector>
 #include <iostream>
-#include <array>
 
 struct BloomSettings {
     float threshold = 1.0f;
@@ -28,6 +27,18 @@ class PostProcessing {
     uint32_t width = 0, height = 0;
     uint32_t bloomWidth = 0, bloomHeight = 0;
     
+    // Offscreen scene render target
+    VkImage sceneImage = VK_NULL_HANDLE;
+    VkImageView sceneView = VK_NULL_HANDLE;
+    VmaAllocation sceneAlloc = nullptr;
+    
+    VkImage sceneDepthImage = VK_NULL_HANDLE;
+    VkImageView sceneDepthView = VK_NULL_HANDLE;
+    VmaAllocation sceneDepthAlloc = nullptr;
+    
+    VkRenderPass sceneRenderPass = VK_NULL_HANDLE;
+    VkFramebuffer sceneFramebuffer = VK_NULL_HANDLE;
+    
     // Bloom target at 1/4 res
     VkImage bloomImage = VK_NULL_HANDLE;
     VkImageView bloomView = VK_NULL_HANDLE;
@@ -38,35 +49,31 @@ class PostProcessing {
     
     VkSampler linearSampler = VK_NULL_HANDLE;
     
-    // Bloom pipeline (extract + box blur in one pass)
+    // Bloom extract pipeline
     VkPipelineLayout bloomLayout = VK_NULL_HANDLE;
     VkPipeline bloomPipeline = VK_NULL_HANDLE;
     VkDescriptorSetLayout bloomDescLayout = VK_NULL_HANDLE;
     VkDescriptorSet bloomDescSet = VK_NULL_HANDLE;
     
-    // Composite pipeline (additive blend)
+    // Final composite pipeline (scene + bloom to swapchain)
     VkPipelineLayout compositeLayout = VK_NULL_HANDLE;
     VkPipeline compositePipeline = VK_NULL_HANDLE;
     VkDescriptorSetLayout compositeDescLayout = VK_NULL_HANDLE;
     VkDescriptorSet compositeDescSet = VK_NULL_HANDLE;
     
-    // Scene copy
-    VkImage sceneCopyImage = VK_NULL_HANDLE;
-    VkImageView sceneCopyView = VK_NULL_HANDLE;
-    VmaAllocation sceneCopyAlloc = nullptr;
+    VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
     
     struct BloomPC { float threshold, intensity, texelX, texelY; };
-    struct CompositePC { float strength, exposure, gamma, pad; };
+    struct CompositePC { float strength, exposure, gamma, bloomEnabled; };
 
 public:
     PostProcessSettings settings;
     
     bool init(VkDevice dev, VmaAllocator alloc, VkDescriptorPool pool,
-              uint32_t w, uint32_t h,
+              uint32_t w, uint32_t h, VkFormat depthFmt,
               const std::string& fullscreenVertPath,
               const std::string& bloomFragPath,
-              const std::string& compositeFragPath,
-              VkRenderPass mainRenderPass) {
+              const std::string& compositeFragPath) {
         device = dev;
         allocator = alloc;
         descriptorPool = pool;
@@ -74,35 +81,82 @@ public:
         height = h;
         bloomWidth = w / 4;
         bloomHeight = h / 4;
+        depthFormat = depthFmt;
         
         if (!createSampler()) return false;
-        if (!createImages()) return false;
-        if (!createRenderPass()) return false;
-        if (!createFramebuffer()) return false;
+        if (!createSceneResources()) return false;
+        if (!createBloomResources()) return false;
         if (!createDescriptors()) return false;
-        if (!createPipelines(fullscreenVertPath, bloomFragPath, compositeFragPath, mainRenderPass)) return false;
+        if (!createPipelines(fullscreenVertPath, bloomFragPath, compositeFragPath)) return false;
         
-        std::cout << "✓ Bloom initialized (" << bloomWidth << "x" << bloomHeight << ")\n";
+        std::cout << "✓ PostProcessing initialized (" << width << "x" << height << ", bloom " << bloomWidth << "x" << bloomHeight << ")\n";
         return true;
     }
     
-    void apply(VkCommandBuffer cmd, VkImage swapchainImage, VkRenderPass mainPass, VkFramebuffer mainFB) {
-        if (!settings.bloom.enabled || !bloomPipeline) return;
+    VkRenderPass getSceneRenderPass() const { return sceneRenderPass; }
+    VkFramebuffer getSceneFramebuffer() const { return sceneFramebuffer; }
+    
+    void beginScenePass(VkCommandBuffer cmd, const std::array<VkClearValue, 2>& clearValues) {
+        VkRenderPassBeginInfo rpInfo{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+        rpInfo.renderPass = sceneRenderPass;
+        rpInfo.framebuffer = sceneFramebuffer;
+        rpInfo.renderArea = {{0, 0}, {width, height}};
+        rpInfo.clearValueCount = 2;
+        rpInfo.pClearValues = clearValues.data();
         
-        copyScene(cmd, swapchainImage);
-        renderBloom(cmd);
-        composite(cmd, mainPass, mainFB);
+        vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+        
+        VkViewport viewport{0, 0, float(width), float(height), 0, 1};
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+        VkRect2D scissor{{0, 0}, {width, height}};
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+    }
+    
+    void endScenePass(VkCommandBuffer cmd) {
+        vkCmdEndRenderPass(cmd);
+    }
+    
+    void applyPostProcess(VkCommandBuffer cmd, VkRenderPass swapchainPass, VkFramebuffer swapchainFB) {
+        // Transition scene image for sampling
+        transitionImage(cmd, sceneImage, 
+                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, 
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                       VK_ACCESS_SHADER_READ_BIT);
+        
+        if (settings.bloom.enabled) {
+            renderBloom(cmd);
+        }
+        
+        // Composite to swapchain
+        composite(cmd, swapchainPass, swapchainFB);
+        
+        // Transition scene image back for next frame
+        transitionImage(cmd, sceneImage,
+                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                       VK_ACCESS_SHADER_READ_BIT,
+                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
     }
     
     void cleanup() {
-        auto freeImg = [&](VkImage& i, VkImageView& v, VmaAllocation& a) {
+        auto destroyImg = [&](VkImage& i, VkImageView& v, VmaAllocation& a) {
             if (v) vkDestroyImageView(device, v, nullptr);
             if (i) vmaDestroyImage(allocator, i, a);
-            v = VK_NULL_HANDLE; i = VK_NULL_HANDLE;
+            v = VK_NULL_HANDLE; i = VK_NULL_HANDLE; a = nullptr;
         };
-        freeImg(bloomImage, bloomView, bloomAlloc);
-        freeImg(sceneCopyImage, sceneCopyView, sceneCopyAlloc);
+        
+        destroyImg(sceneImage, sceneView, sceneAlloc);
+        destroyImg(sceneDepthImage, sceneDepthView, sceneDepthAlloc);
+        destroyImg(bloomImage, bloomView, bloomAlloc);
+        
         if (linearSampler) vkDestroySampler(device, linearSampler, nullptr);
+        if (sceneFramebuffer) vkDestroyFramebuffer(device, sceneFramebuffer, nullptr);
+        if (sceneRenderPass) vkDestroyRenderPass(device, sceneRenderPass, nullptr);
         if (bloomFramebuffer) vkDestroyFramebuffer(device, bloomFramebuffer, nullptr);
         if (bloomRenderPass) vkDestroyRenderPass(device, bloomRenderPass, nullptr);
         if (bloomPipeline) vkDestroyPipeline(device, bloomPipeline, nullptr);
@@ -114,6 +168,23 @@ public:
     }
 
 private:
+    void transitionImage(VkCommandBuffer cmd, VkImage image,
+                        VkImageLayout oldLayout, VkImageLayout newLayout,
+                        VkPipelineStageFlags srcStage, VkPipelineStageFlags dstStage,
+                        VkAccessFlags srcAccess, VkAccessFlags dstAccess) {
+        VkImageMemoryBarrier barrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        barrier.oldLayout = oldLayout;
+        barrier.newLayout = newLayout;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = image;
+        barrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        barrier.srcAccessMask = srcAccess;
+        barrier.dstAccessMask = dstAccess;
+        
+        vkCmdPipelineBarrier(cmd, srcStage, dstStage, 0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+    
     bool createSampler() {
         VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
         si.magFilter = si.minFilter = VK_FILTER_LINEAR;
@@ -121,45 +192,134 @@ private:
         return vkCreateSampler(device, &si, nullptr, &linearSampler) == VK_SUCCESS;
     }
     
-    bool createImages() {
-        // Bloom at 1/4 res, packed float format
-        VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-        ii.imageType = VK_IMAGE_TYPE_2D;
-        ii.extent = {bloomWidth, bloomHeight, 1};
-        ii.mipLevels = ii.arrayLayers = 1;
-        ii.format = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
-        ii.tiling = VK_IMAGE_TILING_OPTIMAL;
-        ii.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    bool createSceneResources() {
+        // Scene color image
+        VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        imgInfo.imageType = VK_IMAGE_TYPE_2D;
+        imgInfo.extent = {width, height, 1};
+        imgInfo.mipLevels = imgInfo.arrayLayers = 1;
+        imgInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT; // HDR format
+        imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imgInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
         
-        VmaAllocationCreateInfo ai{};
-        ai.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-        if (vmaCreateImage(allocator, &ii, &ai, &bloomImage, &bloomAlloc, nullptr) != VK_SUCCESS) return false;
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
         
-        VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-        vi.image = bloomImage;
-        vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        vi.format = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
-        vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        if (vkCreateImageView(device, &vi, nullptr, &bloomView) != VK_SUCCESS) return false;
+        if (vmaCreateImage(allocator, &imgInfo, &allocInfo, &sceneImage, &sceneAlloc, nullptr) != VK_SUCCESS)
+            return false;
         
-        // Scene copy at full res
-        ii.extent = {width, height, 1};
-        ii.format = VK_FORMAT_B8G8R8A8_UNORM;
-        ii.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        if (vmaCreateImage(allocator, &ii, &ai, &sceneCopyImage, &sceneCopyAlloc, nullptr) != VK_SUCCESS) return false;
+        VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        viewInfo.image = sceneImage;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+        viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
         
-        vi.image = sceneCopyImage;
-        vi.format = VK_FORMAT_B8G8R8A8_UNORM;
-        return vkCreateImageView(device, &vi, nullptr, &sceneCopyView) == VK_SUCCESS;
+        if (vkCreateImageView(device, &viewInfo, nullptr, &sceneView) != VK_SUCCESS)
+            return false;
+        
+        // Scene depth image
+        imgInfo.format = depthFormat;
+        imgInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+        
+        if (vmaCreateImage(allocator, &imgInfo, &allocInfo, &sceneDepthImage, &sceneDepthAlloc, nullptr) != VK_SUCCESS)
+            return false;
+        
+        viewInfo.image = sceneDepthImage;
+        viewInfo.format = depthFormat;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        
+        if (vkCreateImageView(device, &viewInfo, nullptr, &sceneDepthView) != VK_SUCCESS)
+            return false;
+        
+        // Scene render pass
+        VkAttachmentDescription attachments[2] = {};
+        attachments[0].format = VK_FORMAT_R16G16B16A16_SFLOAT;
+        attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
+        attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        attachments[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        
+        attachments[1].format = depthFormat;
+        attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
+        attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attachments[1].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attachments[1].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        attachments[1].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        
+        VkAttachmentReference colorRef{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+        VkAttachmentReference depthRef{1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+        
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = &colorRef;
+        subpass.pDepthStencilAttachment = &depthRef;
+        
+        VkSubpassDependency dep{};
+        dep.srcSubpass = VK_SUBPASS_EXTERNAL;
+        dep.dstSubpass = 0;
+        dep.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        dep.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        
+        VkRenderPassCreateInfo rpInfo{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        rpInfo.attachmentCount = 2;
+        rpInfo.pAttachments = attachments;
+        rpInfo.subpassCount = 1;
+        rpInfo.pSubpasses = &subpass;
+        rpInfo.dependencyCount = 1;
+        rpInfo.pDependencies = &dep;
+        
+        if (vkCreateRenderPass(device, &rpInfo, nullptr, &sceneRenderPass) != VK_SUCCESS)
+            return false;
+        
+        // Scene framebuffer
+        VkImageView fbViews[] = {sceneView, sceneDepthView};
+        VkFramebufferCreateInfo fbInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        fbInfo.renderPass = sceneRenderPass;
+        fbInfo.attachmentCount = 2;
+        fbInfo.pAttachments = fbViews;
+        fbInfo.width = width;
+        fbInfo.height = height;
+        fbInfo.layers = 1;
+        
+        return vkCreateFramebuffer(device, &fbInfo, nullptr, &sceneFramebuffer) == VK_SUCCESS;
     }
     
-    bool createRenderPass() {
+    bool createBloomResources() {
+        VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        imgInfo.imageType = VK_IMAGE_TYPE_2D;
+        imgInfo.extent = {bloomWidth, bloomHeight, 1};
+        imgInfo.mipLevels = imgInfo.arrayLayers = 1;
+        imgInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+        imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+        imgInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+        
+        VmaAllocationCreateInfo allocInfo{};
+        allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+        
+        if (vmaCreateImage(allocator, &imgInfo, &allocInfo, &bloomImage, &bloomAlloc, nullptr) != VK_SUCCESS)
+            return false;
+        
+        VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        viewInfo.image = bloomImage;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+        viewInfo.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+        
+        if (vkCreateImageView(device, &viewInfo, nullptr, &bloomView) != VK_SUCCESS)
+            return false;
+        
+        // Bloom render pass
         VkAttachmentDescription att{};
-        att.format = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
+        att.format = VK_FORMAT_R16G16B16A16_SFLOAT;
         att.samples = VK_SAMPLE_COUNT_1_BIT;
         att.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
         att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        att.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
         att.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
         
         VkAttachmentReference ref{0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
@@ -168,89 +328,130 @@ private:
         sub.colorAttachmentCount = 1;
         sub.pColorAttachments = &ref;
         
-        VkRenderPassCreateInfo ci{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-        ci.attachmentCount = 1;
-        ci.pAttachments = &att;
-        ci.subpassCount = 1;
-        ci.pSubpasses = &sub;
-        return vkCreateRenderPass(device, &ci, nullptr, &bloomRenderPass) == VK_SUCCESS;
-    }
-    
-    bool createFramebuffer() {
-        VkFramebufferCreateInfo ci{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-        ci.renderPass = bloomRenderPass;
-        ci.attachmentCount = 1;
-        ci.pAttachments = &bloomView;
-        ci.width = bloomWidth;
-        ci.height = bloomHeight;
-        ci.layers = 1;
-        return vkCreateFramebuffer(device, &ci, nullptr, &bloomFramebuffer) == VK_SUCCESS;
+        VkRenderPassCreateInfo rpInfo{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        rpInfo.attachmentCount = 1;
+        rpInfo.pAttachments = &att;
+        rpInfo.subpassCount = 1;
+        rpInfo.pSubpasses = &sub;
+        
+        if (vkCreateRenderPass(device, &rpInfo, nullptr, &bloomRenderPass) != VK_SUCCESS)
+            return false;
+        
+        VkFramebufferCreateInfo fbInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
+        fbInfo.renderPass = bloomRenderPass;
+        fbInfo.attachmentCount = 1;
+        fbInfo.pAttachments = &bloomView;
+        fbInfo.width = bloomWidth;
+        fbInfo.height = bloomHeight;
+        fbInfo.layers = 1;
+        
+        return vkCreateFramebuffer(device, &fbInfo, nullptr, &bloomFramebuffer) == VK_SUCCESS;
     }
     
     bool createDescriptors() {
-        VkDescriptorSetLayoutBinding b{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
-        VkDescriptorSetLayoutCreateInfo ci{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        ci.bindingCount = 1;
-        ci.pBindings = &b;
-        if (vkCreateDescriptorSetLayout(device, &ci, nullptr, &bloomDescLayout) != VK_SUCCESS) return false;
-        if (vkCreateDescriptorSetLayout(device, &ci, nullptr, &compositeDescLayout) != VK_SUCCESS) return false;
+        // Bloom descriptor - samples scene
+        VkDescriptorSetLayoutBinding binding{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT};
+        VkDescriptorSetLayoutCreateInfo layoutInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        layoutInfo.bindingCount = 1;
+        layoutInfo.pBindings = &binding;
         
-        VkDescriptorSetAllocateInfo ai{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
-        ai.descriptorPool = descriptorPool;
-        ai.descriptorSetCount = 1;
-        ai.pSetLayouts = &bloomDescLayout;
-        if (vkAllocateDescriptorSets(device, &ai, &bloomDescSet) != VK_SUCCESS) return false;
-        ai.pSetLayouts = &compositeDescLayout;
-        if (vkAllocateDescriptorSets(device, &ai, &compositeDescSet) != VK_SUCCESS) return false;
+        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &bloomDescLayout) != VK_SUCCESS)
+            return false;
+        
+        // Composite descriptor - samples scene + bloom
+        VkDescriptorSetLayoutBinding bindings[2] = {
+            {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT},
+            {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT}
+        };
+        layoutInfo.bindingCount = 2;
+        layoutInfo.pBindings = bindings;
+        
+        if (vkCreateDescriptorSetLayout(device, &layoutInfo, nullptr, &compositeDescLayout) != VK_SUCCESS)
+            return false;
+        
+        // Allocate sets
+        VkDescriptorSetAllocateInfo allocInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        allocInfo.descriptorPool = descriptorPool;
+        allocInfo.descriptorSetCount = 1;
+        allocInfo.pSetLayouts = &bloomDescLayout;
+        if (vkAllocateDescriptorSets(device, &allocInfo, &bloomDescSet) != VK_SUCCESS)
+            return false;
+        
+        allocInfo.pSetLayouts = &compositeDescLayout;
+        if (vkAllocateDescriptorSets(device, &allocInfo, &compositeDescSet) != VK_SUCCESS)
+            return false;
+        
+        // Update bloom descriptor (scene image)
+        VkDescriptorImageInfo sceneInfo{linearSampler, sceneView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkWriteDescriptorSet write{VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        write.dstSet = bloomDescSet;
+        write.dstBinding = 0;
+        write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        write.descriptorCount = 1;
+        write.pImageInfo = &sceneInfo;
+        vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+        
+        // Update composite descriptor (scene + bloom)
+        VkDescriptorImageInfo bloomInfo{linearSampler, bloomView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkWriteDescriptorSet writes[2] = {};
+        writes[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, compositeDescSet, 0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER};
+        writes[0].pImageInfo = &sceneInfo;
+        writes[1] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, compositeDescSet, 1, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER};
+        writes[1].pImageInfo = &bloomInfo;
+        vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
         
         return true;
     }
     
-    void updateDescriptors() {
-        VkDescriptorImageInfo sceneInfo{linearSampler, sceneCopyView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkDescriptorImageInfo bloomInfo{linearSampler, bloomView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        
-        VkWriteDescriptorSet w[2]{};
-        w[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, bloomDescSet, 0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER};
-        w[0].pImageInfo = &sceneInfo;
-        w[1] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, compositeDescSet, 0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER};
-        w[1].pImageInfo = &bloomInfo;
-        vkUpdateDescriptorSets(device, 2, w, 0, nullptr);
-    }
-    
-    bool createPipelines(const std::string& vertPath, const std::string& bloomPath, 
-                         const std::string& compositePath, VkRenderPass mainPass) {
+    bool createPipelines(const std::string& vertPath, const std::string& bloomPath, const std::string& compositePath) {
         auto vert = readFile(vertPath);
-        if (vert.empty()) { std::cerr << "Bloom: no vert shader\n"; return false; }
+        if (vert.empty()) { std::cerr << "PostProcess: no vert shader\n"; return false; }
         
         VkShaderModule vertMod = createShader(vert);
         
+        // Bloom pipeline
         auto bloom = readFile(bloomPath);
         if (!bloom.empty()) {
             VkPushConstantRange pc{VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(BloomPC)};
             VkPipelineLayoutCreateInfo li{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-            li.setLayoutCount = 1; li.pSetLayouts = &bloomDescLayout;
-            li.pushConstantRangeCount = 1; li.pPushConstantRanges = &pc;
+            li.setLayoutCount = 1;
+            li.pSetLayouts = &bloomDescLayout;
+            li.pushConstantRangeCount = 1;
+            li.pPushConstantRanges = &pc;
             vkCreatePipelineLayout(device, &li, nullptr, &bloomLayout);
             bloomPipeline = makePipeline(vertMod, createShader(bloom), bloomLayout, bloomRenderPass, false);
         }
         
+        // Composite pipeline
         auto comp = readFile(compositePath);
         if (!comp.empty()) {
             VkPushConstantRange pc{VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(CompositePC)};
             VkPipelineLayoutCreateInfo li{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-            li.setLayoutCount = 1; li.pSetLayouts = &compositeDescLayout;
-            li.pushConstantRangeCount = 1; li.pPushConstantRanges = &pc;
+            li.setLayoutCount = 1;
+            li.pSetLayouts = &compositeDescLayout;
+            li.pushConstantRangeCount = 1;
+            li.pPushConstantRanges = &pc;
             vkCreatePipelineLayout(device, &li, nullptr, &compositeLayout);
-            compositePipeline = makePipeline(vertMod, createShader(comp), compositeLayout, mainPass, true);
         }
         
         vkDestroyShaderModule(device, vertMod, nullptr);
-        updateDescriptors();
-        return bloomPipeline && compositePipeline;
+        return bloomPipeline != VK_NULL_HANDLE;
     }
     
-    VkPipeline makePipeline(VkShaderModule vert, VkShaderModule frag, VkPipelineLayout layout, 
+    // Create composite pipeline for a specific swapchain render pass
+    void ensureCompositePipeline(VkRenderPass swapchainPass) {
+        if (compositePipeline) return;
+        
+        auto vert = readFile("shaders/fullscreen_vert.spv");
+        auto comp = readFile("shaders/composite_frag.spv");
+        if (vert.empty() || comp.empty()) return;
+        
+        VkShaderModule vertMod = createShader(vert);
+        compositePipeline = makePipeline(vertMod, createShader(comp), compositeLayout, swapchainPass, false);
+        vkDestroyShaderModule(device, vertMod, nullptr);
+    }
+    
+    VkPipeline makePipeline(VkShaderModule vert, VkShaderModule frag, VkPipelineLayout layout,
                             VkRenderPass rp, bool additive) {
         VkPipelineShaderStageCreateInfo stages[2] = {
             {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, nullptr, 0, VK_SHADER_STAGE_VERTEX_BIT, vert, "main"},
@@ -315,43 +516,6 @@ private:
         return p;
     }
     
-    void copyScene(VkCommandBuffer cmd, VkImage swap) {
-        VkImageMemoryBarrier b[2]{};
-        b[0] = {VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
-        b[0].oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        b[0].newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        b[0].image = sceneCopyImage;
-        b[0].subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        b[0].srcAccessMask = 0;
-        b[0].dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        
-        b[1] = b[0];
-        b[1].oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        b[1].newLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        b[1].image = swap;
-        b[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        b[1].dstAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 2, b);
-        
-        VkImageCopy r{};
-        r.srcSubresource = r.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
-        r.extent = {width, height, 1};
-        vkCmdCopyImage(cmd, swap, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, sceneCopyImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &r);
-        
-        b[0].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        b[0].newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        b[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        b[0].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        
-        b[1].oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        b[1].newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        b[1].srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
-        b[1].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-        
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr, 0, nullptr, 2, b);
-    }
-    
     void renderBloom(VkCommandBuffer cmd) {
         VkRenderPassBeginInfo rpbi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
         rpbi.renderPass = bloomRenderPass;
@@ -371,14 +535,34 @@ private:
         BloomPC pc{settings.bloom.threshold, settings.bloom.intensity, 1.0f / width, 1.0f / height};
         vkCmdPushConstants(cmd, bloomLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
         vkCmdDraw(cmd, 3, 1, 0, 0);
+        
         vkCmdEndRenderPass(cmd);
     }
     
-    void composite(VkCommandBuffer cmd, VkRenderPass mainPass, VkFramebuffer mainFB) {
+    void composite(VkCommandBuffer cmd, VkRenderPass swapchainPass, VkFramebuffer swapchainFB) {
+        // Lazily create composite pipeline for swapchain render pass
+        if (!compositePipeline && compositeLayout) {
+            auto vert = readFile("shaders/fullscreen_vert.spv");
+            auto comp = readFile("shaders/composite_frag.spv");
+            if (!vert.empty() && !comp.empty()) {
+                VkShaderModule vertMod = createShader(vert);
+                compositePipeline = makePipeline(vertMod, createShader(comp), compositeLayout, swapchainPass, false);
+                vkDestroyShaderModule(device, vertMod, nullptr);
+            }
+        }
+        
+        if (!compositePipeline) return;
+        
         VkRenderPassBeginInfo rpbi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-        rpbi.renderPass = mainPass;
-        rpbi.framebuffer = mainFB;
+        rpbi.renderPass = swapchainPass;
+        rpbi.framebuffer = swapchainFB;
         rpbi.renderArea = {{0, 0}, {width, height}};
+        
+        std::array<VkClearValue, 2> clearValues{};
+        clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+        clearValues[1].depthStencil = {1.0f, 0};
+        rpbi.clearValueCount = 2;
+        rpbi.pClearValues = clearValues.data();
         
         vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
         
@@ -390,10 +574,11 @@ private:
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, compositePipeline);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, compositeLayout, 0, 1, &compositeDescSet, 0, nullptr);
         
-        CompositePC pc{settings.bloom.strength, settings.exposure, settings.gamma, 0};
+        CompositePC pc{settings.bloom.strength, settings.exposure, settings.gamma, settings.bloom.enabled ? 1.0f : 0.0f};
         vkCmdPushConstants(cmd, compositeLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
         vkCmdDraw(cmd, 3, 1, 0, 0);
-        vkCmdEndRenderPass(cmd);
+        
+        // Don't end render pass - let UI render in same pass
     }
     
     std::vector<char> readFile(const std::string& p) {
