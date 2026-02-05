@@ -203,20 +203,20 @@ public:
     g_pipeline->bindDescriptor(cmd, human.descriptorSet);
 
     PushConstants pc;
-    pc.viewProj = g_camera->getViewProjectionMatrix();
-    pc.model = human.transform;
-    pc.lightViewProj = g_shadowMap->lightViewProj;
-    pc.lightDir = g_shadowMap->lightDir;
-    pc.lightColor = glm::vec3(1.0f, 0.95f, 0.9f);
-    pc.ambientStrength = 0.15f;
-    pc.shadowBias = g_shadowMap->bias;
-    pc.fogColor = glm::vec3(fogColor[0], fogColor[1], fogColor[2]);
-    pc.fogDensity = fogDensity;
-    pc.fogStart = fogStart;
-    pc.fogEnd = fogEnd;
-    pc.emissionStrength = emissionStrength;
-    pc.useExponentialFog = exponentialFog ? 1.0f : 0.0f;
-
+pc.lightViewProj = shadowMap.lightViewProj;
+pc.lightDir = shadowMap.lightDir;
+pc.lightColor = glm::vec3(1.0f, 0.95f, 0.9f);
+pc.ambientStrength = 0.15f;
+pc.shadowBias = shadowMap.bias;
+pc.cameraPos = camera.position;  // ADD THIS
+pc.fogColor = glm::vec3(fogColor[0], fogColor[1], fogColor[2]);
+pc.fogDensity = fogDensity;
+pc.fogStart = fogStart;
+pc.fogEnd = fogEnd;
+pc.emissionStrength = emissionStrength;
+pc.useExponentialFog = exponentialFog ? 1.0f : 0.0f;
+for (int i = 0; i < 4; i++) pc.pointLights[i] = pointLights[i];
+pc.numPointLights = numPointLights;
     for (int i = 0; i < 4; i++) {
         pc.pointLights[i] = pointLights[i];
     }

@@ -1,3 +1,5 @@
+
+
 #version 450
 
 layout(binding = 0) uniform UBO {
@@ -13,3 +15,4 @@ void main() {
     vec4 pos = ubo.projection * ubo.view * vec4(inPos, 1.0);
     gl_Position = pos.xyww;
 }
+

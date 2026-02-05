@@ -45,9 +45,10 @@ struct PushConstants {
     float ambientStrength;
     glm::vec3 lightColor;
     float shadowBias;
-    glm::vec3 fogColor;
+    glm::vec3 cameraPos;      // ADD THIS
     float fogDensity;
-    float fogStart;
+    glm::vec3 fogColor;
+    float fogStart;           // REORDER
     float fogEnd;
     float emissionStrength;
     float useExponentialFog;

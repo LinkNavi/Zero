@@ -1,13 +1,15 @@
 #version 450
-layout(location = 0) in vec2 fragTexCoord;
+
+layout(location = 0) in vec3 fragColor;
 layout(location = 1) in vec3 fragNormal;
-layout(location = 2) in vec4 fragColor;
-layout(location = 3) in vec4 fragLightSpacePos;
-layout(location = 4) in vec3 fragWorldPos;
+layout(location = 2) in vec2 fragTexCoord;
+layout(location = 3) in vec3 fragWorldPos;
+layout(location = 4) in vec4 fragLightSpacePos;
+
 layout(location = 0) out vec4 outColor;
 
-layout(set = 0, binding = 0) uniform sampler2D texSampler;
-layout(set = 0, binding = 2) uniform sampler2DShadow shadowMap;
+layout(binding = 0) uniform sampler2D texSampler;
+layout(binding = 2) uniform sampler2D shadowMap;
 
 struct PointLight {
     vec3 position;
@@ -32,97 +34,90 @@ layout(push_constant) uniform PushConstants {
     float useExponentialFog;
     PointLight pointLights[4];
     int numPointLights;
-};
+} pc;
 
-float calcShadow(vec4 lightSpacePos) {
+float calculateShadow(vec4 lightSpacePos, vec3 normal, vec3 lightDir) {
     vec3 projCoords = lightSpacePos.xyz / lightSpacePos.w;
     projCoords.xy = projCoords.xy * 0.5 + 0.5;
     
-    if (projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 || 
-        projCoords.y < 0.0 || projCoords.y > 1.0) {
+    if(projCoords.z > 1.0 || projCoords.x < 0.0 || projCoords.x > 1.0 || 
+       projCoords.y < 0.0 || projCoords.y > 1.0) {
         return 1.0;
     }
     
+    float currentDepth = projCoords.z;
+    float bias = max(0.005 * (1.0 - dot(normal, -lightDir)), pc.shadowBias);
+    
     float shadow = 0.0;
     vec2 texelSize = 1.0 / textureSize(shadowMap, 0);
-    
-    for (int x = -1; x <= 1; x++) {
-        for (int y = -1; y <= 1; y++) {
-            vec3 sampleCoord = vec3(projCoords.xy + vec2(x, y) * texelSize, projCoords.z - shadowBias);
-            shadow += texture(shadowMap, sampleCoord);
+    for(int x = -1; x <= 1; ++x) {
+        for(int y = -1; y <= 1; ++y) {
+            float pcfDepth = texture(shadowMap, projCoords.xy + vec2(x, y) * texelSize).r;
+            shadow += currentDepth - bias > pcfDepth ? 0.0 : 1.0;
         }
     }
+    shadow /= 9.0;
     
-    return shadow / 9.0;
+    return shadow;
 }
 
-vec3 calcPointLight(PointLight light, vec3 normal, vec3 worldPos, vec3 viewDir) {
-    vec3 lightDir = light.position - worldPos;
+vec3 calculatePointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 baseColor) {
+    vec3 lightDir = light.position - fragPos;
     float distance = length(lightDir);
     
-    if (distance > light.radius) return vec3(0.0);
+    if(distance > light.radius) return vec3(0.0);
     
     lightDir = normalize(lightDir);
     
     // Diffuse
     float diff = max(dot(normal, lightDir), 0.0);
     
-    // Specular (Blinn-Phong)
-    vec3 halfDir = normalize(lightDir + viewDir);
-    float spec = pow(max(dot(normal, halfDir), 0.0), 32.0);
-    
     // Attenuation
-    float attenuation = light.intensity / (1.0 + distance * distance);
-    attenuation *= smoothstep(light.radius, light.radius * 0.5, distance);
+    float attenuation = 1.0 - (distance / light.radius);
+    attenuation = attenuation * attenuation;
     
-    return light.color * (diff + spec * 0.5) * attenuation;
+    vec3 diffuse = diff * light.color * light.intensity * attenuation;
+    
+    return diffuse * baseColor;
+}
+
+float calculateFog(float distance) {
+    if(pc.useExponentialFog > 0.5) {
+        // Exponential fog
+        return 1.0 - exp(-pc.fogDensity * distance);
+    } else {
+        // Linear fog
+        return clamp((distance - pc.fogStart) / (pc.fogEnd - pc.fogStart), 0.0, 1.0);
+    }
 }
 
 void main() {
     vec4 texColor = texture(texSampler, fragTexCoord);
+    vec3 baseColor = texColor.rgb * fragColor;
+    
     vec3 normal = normalize(fragNormal);
     
-    // View direction for specular
-    mat4 invViewProj = inverse(viewProj);
-    vec3 camPos = invViewProj[3].xyz / invViewProj[3].w;
-    vec3 viewDir = normalize(camPos - fragWorldPos);
-    
-    // Directional lighting
-    vec3 lightDirNorm = normalize(-lightDir);
-    float diff = max(dot(normal, lightDirNorm), 0.0);
-    
-    // Specular for directional light
-    vec3 halfDir = normalize(lightDirNorm + viewDir);
-    float spec = pow(max(dot(normal, halfDir), 0.0), 32.0);
-    
-    float shadow = calcShadow(fragLightSpacePos);
-    
-    vec3 ambient = ambientStrength * lightColor;
-    vec3 diffuse = (diff + spec * 0.5) * lightColor * shadow;
+    // Directional light
+    float diff = max(dot(normal, -pc.lightDir), 0.0);
+    float shadow = calculateShadow(fragLightSpacePos, normal, pc.lightDir);
+    vec3 directionalLight = (pc.ambientStrength + diff * shadow) * pc.lightColor;
     
     // Point lights
-    vec3 pointLighting = vec3(0.0);
-    for (int i = 0; i < numPointLights && i < 4; i++) {
-        pointLighting += calcPointLight(pointLights[i], normal, fragWorldPos, viewDir);
+    vec3 pointLightContribution = vec3(0.0);
+    for(int i = 0; i < pc.numPointLights && i < 4; ++i) {
+        pointLightContribution += calculatePointLight(pc.pointLights[i], normal, fragWorldPos, baseColor);
     }
     
-    vec3 finalColor = (ambient + diffuse + pointLighting) * texColor.rgb * fragColor.rgb;
+    // Combine lighting
+    vec3 litColor = baseColor * directionalLight + pointLightContribution;
     
-    // Emission
-    vec3 emission = texColor.rgb * texColor.a * emissionStrength;
-    finalColor += emission;
+    // Add emission
+    litColor += baseColor * pc.emissionStrength;
     
-    // Fog
-    float dist = length(fragWorldPos - camPos);
+    // Apply fog
+    float distance = length(fragWorldPos);
+    float fogFactor = calculateFog(distance);
+    vec3 finalColor = mix(litColor, pc.fogColor, fogFactor);
     
-    float fogFactor;
-    if (useExponentialFog > 0.5) {
-        fogFactor = exp(-fogDensity * dist);
-    } else {
-        fogFactor = clamp((fogEnd - dist) / (fogEnd - fogStart), 0.0, 1.0);
-    }
-    
-    finalColor = mix(fogColor, finalColor, fogFactor);
-    
-    outColor = vec4(finalColor, 1.0);
+    outColor = vec4(finalColor, texColor.a);
 }
