@@ -21,7 +21,7 @@
 #include <iostream>
 
 Skybox skybox;
-PostProcessing* g_postProcess = nullptr;
+PostProcessing g_postProcess;
 
 // Globals
 VulkanRenderer *g_renderer = nullptr;
@@ -41,10 +41,10 @@ static float emissionStrength = 0.0f;
 
 // Point lights
 static PointLight pointLights[4] = {
-    {{5.0f, 2.0f, 0.0f}, 15.0f, {1.0f, 0.3f, 0.1f}, 10.0f},  // Orange
-    {{-5.0f, 2.0f, 0.0f}, 15.0f, {0.1f, 0.3f, 1.0f}, 10.0f}, // Blue
-    {{0.0f, 2.0f, 5.0f}, 15.0f, {0.1f, 1.0f, 0.3f}, 10.0f},  // Green
-    {{0.0f, 2.0f, -5.0f}, 15.0f, {1.0f, 1.0f, 0.1f}, 10.0f}  // Yellow
+    {{5.0f, 2.0f, 0.0f}, 15.0f, {1.0f, 0.3f, 0.1f}, 10.0f},
+    {{-5.0f, 2.0f, 0.0f}, 15.0f, {0.1f, 0.3f, 1.0f}, 10.0f},
+    {{0.0f, 2.0f, 5.0f}, 15.0f, {0.1f, 1.0f, 0.3f}, 10.0f},
+    {{0.0f, 2.0f, -5.0f}, 15.0f, {1.0f, 1.0f, 0.1f}, 10.0f}
 };
 static int numPointLights = 4;
 
@@ -115,7 +115,7 @@ public:
     }
   }
 
- void render(VkCommandBuffer cmd) {
+  void render(VkCommandBuffer cmd) {
     g_pipeline->bind(cmd);
 
     for (auto &duck : ducks) {
@@ -150,7 +150,7 @@ public:
                            VK_INDEX_TYPE_UINT32);
       vkCmdDrawIndexed(cmd, duck.model->totalIndices, 1, 0, 0, 0);
     }
-}
+  }
 
   void onUnload() override {
     for (auto &d : ducks)
@@ -199,7 +199,7 @@ public:
     vkCmdDrawIndexed(cmd, humanModel.totalIndices, 1, 0, 0, 0);
   }
 
-void render(VkCommandBuffer cmd) {
+  void render(VkCommandBuffer cmd) {
     g_pipeline->bind(cmd);
     g_pipeline->bindDescriptor(cmd, human.descriptorSet);
 
@@ -230,7 +230,7 @@ void render(VkCommandBuffer cmd) {
     vkCmdBindVertexBuffers(cmd, 0, 1, &humanModel.vertexBuffer, &offset);
     vkCmdBindIndexBuffer(cmd, humanModel.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(cmd, humanModel.totalIndices, 1, 0, 0, 0);
-}
+  }
 
   void onUnload() override {
     human.cleanup();
@@ -300,15 +300,13 @@ int main() {
                 ResourcePath::shaders("unified_frag.spv"));
   g_pipeline = &pipeline;
 
-  // Post processing (bloom - not fully implemented)
-  PostProcessing postProcess;
-  postProcess.init(renderer.getDevice(), renderer.getAllocator(), g_descriptorPool,
-                  renderer.getWidth(), renderer.getHeight(),
-                  ResourcePath::shaders("fullscreen_vert.spv"),
-                  ResourcePath::shaders("bloom_extract_frag.spv"),
-                  ResourcePath::shaders("bloom_blur_frag.spv"),
-                  ResourcePath::shaders("bloom_composite_frag.spv"));
-  g_postProcess = &postProcess;
+  // Post processing (bloom) - optional, uses swapchain directly
+  g_postProcess.init(renderer.getDevice(), renderer.getAllocator(), g_descriptorPool,
+                     renderer.getWidth(), renderer.getHeight(),
+                     ResourcePath::shaders("fullscreen_vert.spv"),
+                     ResourcePath::shaders("bloom_frag.spv"),
+                     ResourcePath::shaders("composite_frag.spv"),
+                     renderer.getRenderPass());
 
   // Model loader
   ModelLoader modelLoader;
@@ -399,7 +397,7 @@ int main() {
 
     shadowMap.endShadowPass(cmd);
 
-    // ===== MAIN PASS =====
+    // ===== SCENE PASS =====
     VkRenderPassBeginInfo rpInfo{};
     rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpInfo.renderPass = renderer.getRenderPass();
@@ -429,8 +427,30 @@ int main() {
       walk->render(cmd);
     }
 
-    // UI
+    vkCmdEndRenderPass(cmd);
+
+    // ===== BLOOM (optional, only if enabled) =====
+    if (g_postProcess.settings.bloom.enabled) {
+      // Get current swapchain image for copy
+      g_postProcess.apply(cmd, renderer.getCurrentSwapchainImage(), 
+                          renderer.getRenderPass(), renderer.getCurrentFramebuffer());
+    }
+
+    // ===== UI (new render pass) =====
     if (showUI) {
+      VkRenderPassBeginInfo uiRpInfo{};
+      uiRpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+      uiRpInfo.renderPass = renderer.getRenderPass();
+      uiRpInfo.framebuffer = renderer.getCurrentFramebuffer();
+      uiRpInfo.renderArea.extent = {renderer.getWidth(), renderer.getHeight()};
+      // Don't clear for UI pass
+      uiRpInfo.clearValueCount = 0;
+      
+      vkCmdBeginRenderPass(cmd, &uiRpInfo, VK_SUBPASS_CONTENTS_INLINE);
+      
+      vkCmdSetViewport(cmd, 0, 1, &viewport);
+      vkCmdSetScissor(cmd, 0, 1, &scissor);
+
       renderer.imguiNewFrame();
       ImGui::Begin("Debug");
       ImGui::Text("FPS: %.1f (%.2f ms)", displayFps, displayFrameTime);
@@ -458,6 +478,28 @@ int main() {
         shadowMap.lightDir = glm::normalize(shadowMap.lightDir);
       }
 
+      // ===== BLOOM CONTROLS =====
+      ImGui::Separator();
+      ImGui::Text("Bloom Settings");
+      ImGui::Checkbox("Enable Bloom", &g_postProcess.settings.bloom.enabled);
+      
+      if (g_postProcess.settings.bloom.enabled) {
+        ImGui::SliderFloat("Threshold", &g_postProcess.settings.bloom.threshold, 0.0f, 3.0f, "%.2f");
+        ImGui::SetItemTooltip("Brightness threshold for bloom extraction");
+        
+        ImGui::SliderFloat("Intensity", &g_postProcess.settings.bloom.intensity, 0.0f, 5.0f, "%.2f");
+        ImGui::SetItemTooltip("Brightness multiplier for extracted bloom");
+        
+        ImGui::SliderFloat("Strength", &g_postProcess.settings.bloom.strength, 0.0f, 2.0f, "%.2f");
+        ImGui::SetItemTooltip("How much bloom is added to final image");
+      }
+      
+      ImGui::Separator();
+      ImGui::Text("Tone Mapping");
+      ImGui::SliderFloat("Exposure", &g_postProcess.settings.exposure, 0.1f, 5.0f, "%.2f");
+      ImGui::SliderFloat("Gamma", &g_postProcess.settings.gamma, 1.0f, 3.0f, "%.2f");
+
+      // ===== POINT LIGHTS =====
       ImGui::Separator();
       ImGui::Text("Point Lights");
       ImGui::SliderInt("Num Lights", &numPointLights, 0, 4);
@@ -486,7 +528,6 @@ int main() {
         for (int i = 0; i < numPointLights && i < 4; i++) {
           glm::vec3 lightPos = pointLights[i].position;
           
-          // Project 3D light position to screen space
           glm::vec4 clipPos = camera.getViewProjectionMatrix() * glm::vec4(lightPos, 1.0f);
           if (clipPos.w > 0) {
             glm::vec3 ndcPos = glm::vec3(clipPos) / clipPos.w;
@@ -511,13 +552,7 @@ int main() {
         }
       }
 
-      ImGui::Separator();
-      ImGui::Text("Bloom");
-      ImGui::Checkbox("Enable##Bloom", &g_postProcess->settings.bloom.enabled);
-      ImGui::SliderFloat("Threshold", &g_postProcess->settings.bloom.threshold, 0.0f, 5.0f);
-      ImGui::SliderFloat("Intensity", &g_postProcess->settings.bloom.intensity, 0.0f, 3.0f);
-      ImGui::SliderFloat("Strength", &g_postProcess->settings.bloom.strength, 0.0f, 2.0f);
-
+      // ===== FOG =====
       ImGui::Separator();
       ImGui::Text("Fog Settings");
       ImGui::Checkbox("Exponential Fog", &exponentialFog);
@@ -530,6 +565,7 @@ int main() {
       ImGui::ColorEdit3("Fog Color", fogColor);
       ImGui::SliderFloat("Emission", &emissionStrength, 0.0f, 5.0f);
 
+      // ===== SCENE INFO =====
       ImGui::Separator();
       if (auto *duck = dynamic_cast<DuckScene *>(scene)) {
         ImGui::Text("Ducks: %zu", duck->ducks.size());
@@ -552,9 +588,10 @@ int main() {
 
       ImGui::End();
       renderer.imguiRender(cmd);
+      
+      vkCmdEndRenderPass(cmd);
     }
-
-    vkCmdEndRenderPass(cmd);
+    
     renderer.endFrame(cmd);
     Input::update();
   }
@@ -565,7 +602,7 @@ int main() {
   modelLoader.cleanupLoader();
   pipeline.cleanup();
   shadowMap.cleanup();
-  postProcess.cleanup();
+  g_postProcess.cleanup();
   skybox.cleanup();
   vkDestroyDescriptorPool(renderer.getDevice(), g_descriptorPool, nullptr);
   renderer.imguiCleanup();

@@ -244,7 +244,7 @@ public:
         io.AddMouseButtonEvent(0, glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS);
         io.AddMouseButtonEvent(1, glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
     }
-
+VkImage getCurrentSwapchainImage() const { return swapchainImages[imageIndex]; }
     void imguiRender(VkCommandBuffer cmd) {
         ImGui::Render();
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
