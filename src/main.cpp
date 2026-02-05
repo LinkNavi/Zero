@@ -115,7 +115,7 @@ public:
     }
   }
 
-  void render(VkCommandBuffer cmd) {
+ void render(VkCommandBuffer cmd) {
     g_pipeline->bind(cmd);
 
     for (auto &duck : ducks) {
@@ -129,6 +129,7 @@ public:
       pc.lightColor = glm::vec3(1.0f, 0.95f, 0.9f);
       pc.ambientStrength = 0.15f;
       pc.shadowBias = g_shadowMap->bias;
+      pc.cameraPos = g_camera->position;
       pc.fogColor = glm::vec3(fogColor[0], fogColor[1], fogColor[2]);
       pc.fogDensity = fogDensity;
       pc.fogStart = fogStart;
@@ -149,7 +150,7 @@ public:
                            VK_INDEX_TYPE_UINT32);
       vkCmdDrawIndexed(cmd, duck.model->totalIndices, 1, 0, 0, 0);
     }
-  }
+}
 
   void onUnload() override {
     for (auto &d : ducks)
@@ -198,25 +199,26 @@ public:
     vkCmdDrawIndexed(cmd, humanModel.totalIndices, 1, 0, 0, 0);
   }
 
-  void render(VkCommandBuffer cmd) {
+void render(VkCommandBuffer cmd) {
     g_pipeline->bind(cmd);
     g_pipeline->bindDescriptor(cmd, human.descriptorSet);
 
     PushConstants pc;
-pc.lightViewProj = shadowMap.lightViewProj;
-pc.lightDir = shadowMap.lightDir;
-pc.lightColor = glm::vec3(1.0f, 0.95f, 0.9f);
-pc.ambientStrength = 0.15f;
-pc.shadowBias = shadowMap.bias;
-pc.cameraPos = camera.position;  // ADD THIS
-pc.fogColor = glm::vec3(fogColor[0], fogColor[1], fogColor[2]);
-pc.fogDensity = fogDensity;
-pc.fogStart = fogStart;
-pc.fogEnd = fogEnd;
-pc.emissionStrength = emissionStrength;
-pc.useExponentialFog = exponentialFog ? 1.0f : 0.0f;
-for (int i = 0; i < 4; i++) pc.pointLights[i] = pointLights[i];
-pc.numPointLights = numPointLights;
+    pc.viewProj = g_camera->getViewProjectionMatrix();
+    pc.model = human.transform;
+    pc.lightViewProj = g_shadowMap->lightViewProj;
+    pc.lightDir = g_shadowMap->lightDir;
+    pc.lightColor = glm::vec3(1.0f, 0.95f, 0.9f);
+    pc.ambientStrength = 0.15f;
+    pc.shadowBias = g_shadowMap->bias;
+    pc.cameraPos = g_camera->position;
+    pc.fogColor = glm::vec3(fogColor[0], fogColor[1], fogColor[2]);
+    pc.fogDensity = fogDensity;
+    pc.fogStart = fogStart;
+    pc.fogEnd = fogEnd;
+    pc.emissionStrength = emissionStrength;
+    pc.useExponentialFog = exponentialFog ? 1.0f : 0.0f;
+    
     for (int i = 0; i < 4; i++) {
         pc.pointLights[i] = pointLights[i];
     }
@@ -228,7 +230,7 @@ pc.numPointLights = numPointLights;
     vkCmdBindVertexBuffers(cmd, 0, 1, &humanModel.vertexBuffer, &offset);
     vkCmdBindIndexBuffer(cmd, humanModel.indexBuffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdDrawIndexed(cmd, humanModel.totalIndices, 1, 0, 0, 0);
-  }
+}
 
   void onUnload() override {
     human.cleanup();
