@@ -4,6 +4,8 @@
 #include "transform.h"
 #include "tags.h"
 #include "PhysicsSystem.h"
+#include "ModelComponent.h"
+#include "CameraComponent.h"
 #include <iostream>
 
 namespace ScenePackaging {
@@ -35,7 +37,7 @@ public:
         }
         
         metadata.entityCount = entityCount;
-        metadata.componentTypeCount = 5; // Transform, Tag, Layer, RigidBody, Collider
+        metadata.componentTypeCount = 7; // Transform, Tag, Layer, RigidBody, Collider, ModelComponent, CameraComponent
         strncpy(metadata.sceneName, sceneName.c_str(), sizeof(metadata.sceneName) - 1);
         strncpy(metadata.sceneVersion, "1.0.0", sizeof(metadata.sceneVersion) - 1);
         
@@ -126,46 +128,58 @@ public:
 
 private:
     // Serialize a single entity to binary format
-   static std::vector<uint8_t> serializeEntity(ECS* ecs, EntityID id) {
-    std::vector<uint8_t> data;
-    
-    // Only check components that are actually registered
-    auto* transform = ecs->getComponent<Transform>(id);
-    auto* tag = ecs->getComponent<Tag>(id);
-    auto* layer = ecs->getComponent<Layer>(id);
-    
-    // Component presence flags (1 byte)
-    uint8_t flags = 0;
-    if (transform) flags |= 0x01;
-    if (tag) flags |= 0x02;
-    if (layer) flags |= 0x04;
-    // Skip RigidBody and Collider if not registered
-    // flags |= 0x08 and 0x10 only if physics is enabled
-    
-    data.push_back(flags);
-    
-    // Serialize Transform
-    if (transform) {
-        writeBytes(data, transform->position);
-        writeBytes(data, transform->rotation);
-        writeBytes(data, transform->scale);
-        writeBytes(data, transform->parent);
+    static std::vector<uint8_t> serializeEntity(ECS* ecs, EntityID id) {
+        std::vector<uint8_t> data;
+        
+        // Check all components
+        auto* transform = ecs->getComponent<Transform>(id);
+        auto* tag = ecs->getComponent<Tag>(id);
+        auto* layer = ecs->getComponent<Layer>(id);
+        auto* modelComp = ecs->getComponent<ModelComponent>(id);
+        auto* cameraComp = ecs->getComponent<CameraComponent>(id);
+        
+        // Component presence flags (2 bytes now - need more bits)
+        uint16_t flags = 0;
+        if (transform) flags |= 0x01;
+        if (tag) flags |= 0x02;
+        if (layer) flags |= 0x04;
+        if (modelComp) flags |= 0x20;      // ModelComponent
+        if (cameraComp) flags |= 0x40;     // CameraComponent
+        // 0x08 and 0x10 reserved for RigidBody and Collider
+        
+        writeBytes(data, flags);
+        
+        // Serialize Transform
+        if (transform) {
+            writeBytes(data, transform->position);
+            writeBytes(data, transform->rotation);
+            writeBytes(data, transform->scale);
+            writeBytes(data, transform->parent);
+        }
+        
+        // Serialize Tag
+        if (tag) {
+            writeString(data, tag->name);
+        }
+        
+        // Serialize Layer
+        if (layer) {
+            writeBytes(data, layer->mask);
+        }
+        
+        // Serialize ModelComponent (just the path, not the loaded model)
+        if (modelComp) {
+            writeString(data, modelComp->modelPath);
+        }
+        
+        // Serialize CameraComponent
+        if (cameraComp) {
+            writeBytes(data, cameraComp->isActive);
+            // CameraComponent only has isActive - camera properties are in Camera class
+        }
+        
+        return data;
     }
-    
-    // Serialize Tag
-    if (tag) {
-        writeString(data, tag->name);
-    }
-    
-    // Serialize Layer
-    if (layer) {
-        writeBytes(data, layer->mask);
-    }
-    
-    // RigidBody and Collider serialization removed - add back when physics is registered
-    
-    return data;
-}
     
     // Deserialize a single entity from binary format
     static bool deserializeEntity(ECS* ecs, const std::vector<uint8_t>& data) {
@@ -173,8 +187,8 @@ private:
         
         size_t offset = 0;
         
-        // Read component flags
-        uint8_t flags = data[offset++];
+        // Read component flags (16-bit now)
+        uint16_t flags = readUint16(data, offset);
         
         EntityID entity = ecs->createEntity();
         
@@ -224,6 +238,22 @@ private:
             ecs->addComponent(entity, col);
         }
         
+        // Deserialize ModelComponent
+        if (flags & 0x20) {
+            ModelComponent mc;
+            mc.modelPath = readString(data, offset);
+            mc.loadedModel = nullptr; // Will be loaded by ZeroEngine
+            ecs->addComponent(entity, mc);
+        }
+        
+        // Deserialize CameraComponent
+        if (flags & 0x40) {
+            CameraComponent cc;
+            cc.isActive = readBool(data, offset);
+            // CameraComponent only has isActive - camera properties are in Camera class
+            ecs->addComponent(entity, cc);
+        }
+        
         return true;
     }
     
@@ -259,6 +289,13 @@ private:
         uint32_t v;
         memcpy(&v, &data[offset], sizeof(uint32_t));
         offset += sizeof(uint32_t);
+        return v;
+    }
+    
+    static uint16_t readUint16(const std::vector<uint8_t>& data, size_t& offset) {
+        uint16_t v;
+        memcpy(&v, &data[offset], sizeof(uint16_t));
+        offset += sizeof(uint16_t);
         return v;
     }
     

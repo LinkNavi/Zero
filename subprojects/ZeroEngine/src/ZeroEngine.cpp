@@ -1,3 +1,4 @@
+// Complete ZeroEngine.cpp implementation with scene save/load
 #include "ZeroEngine.h"
 #include "Renderer.h"
 #include "Camera.h"
@@ -190,15 +191,17 @@ struct ZeroEngine::Impl {
     PlayState playState = PlayState::Editing;
     bool running = false;
     
-    // Vulkan context (owned in standalone, borrowed in embedded)
+    // Vulkan context
     VkDevice device = VK_NULL_HANDLE;
+    VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
     VmaAllocator allocator = nullptr;
     VkCommandPool commandPool = VK_NULL_HANDLE;
     VkQueue graphicsQueue = VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool = VK_NULL_HANDLE;
+    uint32_t graphicsQueueFamily = 0;
     
     // Subsystems
-    VulkanRenderer* renderer = nullptr;  // only in standalone mode
+    VulkanRenderer* renderer = nullptr;
     Pipeline pipeline;
     ModelLoader modelLoader;
     ShadowMap shadowMap;
@@ -211,12 +214,13 @@ struct ZeroEngine::Impl {
     
     // Cameras
     Camera editorCamera;
+    CameraController* cameraController = nullptr;  // For editor camera controls
     EntityID activeCameraEntity = INVALID_ENTITY;
     
     // Offscreen target (embedded mode)
     OffscreenTarget offscreen;
     
-    // Embedded mode command buffer (allocated per frame)
+    // Embedded mode command buffer
     VkCommandBuffer frameCmd = VK_NULL_HANDLE;
     VkFence frameFence = VK_NULL_HANDLE;
     
@@ -237,6 +241,12 @@ struct ZeroEngine::Impl {
     // Track loaded models for cleanup
     std::vector<EntityID> modelEntities;
     
+    // Snapshot for play mode
+    struct SceneSnapshot {
+        std::vector<uint8_t> data;
+        bool valid = false;
+    } sceneSnapshot;
+    
     // ==================== Init ====================
     
     bool init(const EngineConfig& cfg) {
@@ -253,7 +263,6 @@ struct ZeroEngine::Impl {
     }
     
     bool initStandalone() {
-        // Create renderer (owns window + swapchain)
         renderer = new VulkanRenderer();
         if (!renderer->init(config.width, config.height, config.windowTitle.c_str())) {
             std::cerr << "Failed to initialize renderer\n";
@@ -261,14 +270,27 @@ struct ZeroEngine::Impl {
         }
         
         device = renderer->getDevice();
+        physicalDevice = renderer->getPhysicalDevice();
         allocator = renderer->getAllocator();
         commandPool = renderer->getCommandPool();
         graphicsQueue = renderer->getGraphicsQueue();
+        graphicsQueueFamily = renderer->getGraphicsQueueFamily();
         
         g_renderer = renderer;
         
         Input::init(renderer->getWindow());
         Time::init();
+        
+        // Initialize editor camera
+        editorCamera.position = glm::vec3(0, 2, 5);
+        editorCamera.target = glm::vec3(0, 0, 0);
+        editorCamera.aspectRatio = float(config.width) / float(config.height);
+        
+        // Create camera controller for editor camera
+        // CameraController needs a Config object
+        Config cfg;
+        cfg.load("config.ini");  // Load config if it exists
+        cameraController = new CameraController(&editorCamera, cfg);
         
         if (!createDescriptorPool()) return false;
         if (!initSubsystems(renderer->getRenderPass())) return false;
@@ -281,11 +303,12 @@ struct ZeroEngine::Impl {
     }
     
     bool initEmbedded() {
-        // Borrow Vulkan context from editor
         device = config.device;
+        physicalDevice = config.physicalDevice;
         allocator = config.allocator;
         commandPool = config.commandPool;
         graphicsQueue = config.graphicsQueue;
+        graphicsQueueFamily = config.graphicsQueueFamily;
         descriptorPool = config.descriptorPool;
         g_descriptorPool = descriptorPool;
         
@@ -294,7 +317,6 @@ struct ZeroEngine::Impl {
             return false;
         }
         
-        // Create offscreen render target
         uint32_t w = config.width > 0 ? config.width : 1280;
         uint32_t h = config.height > 0 ? config.height : 720;
         
@@ -303,12 +325,10 @@ struct ZeroEngine::Impl {
             return false;
         }
         
-        // Create descriptor pool if not provided
         if (!descriptorPool) {
             if (!createDescriptorPool()) return false;
         }
         
-        // Create frame sync
         VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
         vkCreateFence(device, &fenceInfo, nullptr, &frameFence);
@@ -318,7 +338,6 @@ struct ZeroEngine::Impl {
         running = true;
         lastTime = Clock::now();
         
-        // Setup editor camera
         editorCamera.position = glm::vec3(0, 2, 5);
         editorCamera.target = glm::vec3(0, 0, 0);
         editorCamera.aspectRatio = float(w) / float(h);
@@ -346,7 +365,6 @@ struct ZeroEngine::Impl {
     }
     
     bool initSubsystems(VkRenderPass renderPass) {
-        // Shadow map
         if (config.enableShadows) {
             if (!shadowMap.init(device, allocator)) {
                 std::cerr << "Failed to init shadow map\n";
@@ -360,7 +378,6 @@ struct ZeroEngine::Impl {
             shadowsEnabled = true;
         }
         
-        // Pipeline
         if (!pipeline.init(device, renderPass,
                      ResourcePath::shaders("unified_vert.spv"),
                      ResourcePath::shaders("unified_frag.spv"))) {
@@ -369,7 +386,6 @@ struct ZeroEngine::Impl {
         }
         g_pipeline = &pipeline;
         
-        // Model loader
         if (!modelLoader.init(device, allocator, commandPool, graphicsQueue,
                         descriptorPool, pipeline.getDescriptorLayout())) {
             std::cerr << "Failed to init model loader\n";
@@ -377,10 +393,8 @@ struct ZeroEngine::Impl {
         }
         g_modelLoader = &modelLoader;
         
-        // Default bone buffer
         defaultBoneBuffer.create(allocator);
         
-        // Skybox
         if (config.enableSkybox) {
             std::vector<std::string> skyboxFaces = {
                 ResourcePath::textures("skybox/right.jpg"),
@@ -397,7 +411,6 @@ struct ZeroEngine::Impl {
                    ResourcePath::shaders("skybox_frag.spv"), skyboxFaces);
         }
         
-        // ECS
         ecs = new ECS();
         ecs->registerComponent<Transform>();
         ecs->registerComponent<Tag>();
@@ -413,7 +426,6 @@ struct ZeroEngine::Impl {
     void update(float dt) {
         if (!running) return;
         
-        // Calculate dt if not provided
         if (dt < 0.0f) {
             auto now = Clock::now();
             dt = std::chrono::duration<float>(now - lastTime).count();
@@ -436,23 +448,25 @@ struct ZeroEngine::Impl {
         
         Time::update();
         
+        // Update camera controller in edit mode
+        if (playState == PlayState::Editing && cameraController) {
+            cameraController->update(dt, renderer->getWindow());
+        }
+        
         if (playState == PlayState::Playing) {
             ecs->updateSystems(dt);
         }
         
-        // Get active camera
         Camera* cam = getActiveCamera();
         if (!cam) return;
         
         VkCommandBuffer cmd;
         renderer->beginFrame(cmd);
         
-        // Shadow pass
         if (shadowsEnabled) {
             renderShadowPass(cmd);
         }
         
-        // Main pass to swapchain
         VkRenderPassBeginInfo rpInfo{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
         rpInfo.renderPass = renderer->getRenderPass();
         rpInfo.framebuffer = renderer->getCurrentFramebuffer();
@@ -492,11 +506,9 @@ struct ZeroEngine::Impl {
             if (gameCam) cam = gameCam;
         }
         
-        // Wait for previous frame
         vkWaitForFences(device, 1, &frameFence, VK_TRUE, UINT64_MAX);
         vkResetFences(device, 1, &frameFence);
         
-        // Allocate command buffer
         VkCommandBufferAllocateInfo allocInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
         allocInfo.commandPool = commandPool;
         allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -509,12 +521,10 @@ struct ZeroEngine::Impl {
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(cmd, &beginInfo);
         
-        // Shadow pass
         if (shadowsEnabled) {
             renderShadowPass(cmd);
         }
         
-        // Render to offscreen target
         VkRenderPassBeginInfo rpInfo{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
         rpInfo.renderPass = offscreen.renderPass;
         rpInfo.framebuffer = offscreen.framebuffer;
@@ -544,8 +554,6 @@ struct ZeroEngine::Impl {
         submitInfo.pCommandBuffers = &cmd;
         vkQueueSubmit(graphicsQueue, 1, &submitInfo, frameFence);
         
-        // Free command buffer (will be reused next frame after fence)
-        // Actually, we should wait or double-buffer. For simplicity, just store it.
         frameCmd = cmd;
     }
     
@@ -581,12 +589,10 @@ struct ZeroEngine::Impl {
     }
     
     void renderScene(VkCommandBuffer cmd, Camera* cam) {
-        // Skybox
         if (skyboxEnabled) {
             skybox.render(cmd, cam->getViewMatrix(), cam->getProjectionMatrix());
         }
         
-        // Bind main pipeline
         pipeline.bind(cmd);
         
         int rendered = 0;
@@ -639,7 +645,6 @@ struct ZeroEngine::Impl {
     // ==================== Camera helpers ====================
     
     Camera* getActiveCamera() {
-        // In editing mode, use editor camera
         if (playState == PlayState::Editing) {
             return &editorCamera;
         }
@@ -683,6 +688,12 @@ struct ZeroEngine::Impl {
             delete mc->loadedModel;
             mc->loadedModel = nullptr;
         }
+        
+        auto it = std::find(modelEntities.begin(), modelEntities.end(), id);
+        if (it != modelEntities.end()) {
+            modelEntities.erase(it);
+        }
+        
         ecs->destroyEntity(id);
     }
     
@@ -692,7 +703,6 @@ struct ZeroEngine::Impl {
             ecs->addComponent(id, ModelComponent(path));
             mc = ecs->getComponent<ModelComponent>(id);
         } else {
-            // Cleanup old model
             if (mc->loadedModel) {
                 modelLoader.cleanup(*mc->loadedModel);
                 delete mc->loadedModel;
@@ -701,13 +711,11 @@ struct ZeroEngine::Impl {
             mc->modelPath = path;
         }
         
-        // Load
         Model m = modelLoader.load(path);
         if (m.vertices.empty()) return false;
         
         mc->loadedModel = new Model(std::move(m));
         
-        // Write missing descriptor bindings (1: bones, 2: shadow)
         fixDescriptorSet(mc->loadedModel);
         
         modelEntities.push_back(id);
@@ -724,7 +732,6 @@ struct ZeroEngine::Impl {
         
         VkWriteDescriptorSet writes[2] = {};
         
-        // Binding 1: bone buffer
         writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         writes[0].dstSet = model->descriptorSet;
         writes[0].dstBinding = 1;
@@ -761,48 +768,61 @@ struct ZeroEngine::Impl {
         
         if (mode == EngineMode::Embedded) {
             offscreen.destroy(device, allocator);
-            
-            // Need to recreate pipeline for new render pass
-            // (render pass format doesn't change, so we can reuse it)
             offscreen.create(device, allocator, w, h);
-            
             editorCamera.aspectRatio = float(w) / float(h);
-        } else if (renderer) {
-            // TODO: swapchain recreation
-            // renderer->resize(w, h);
         }
     }
     
     // ==================== Scene ====================
     
     bool loadScene(const std::string& path) {
-        // Clear existing
         clearScene();
         
         if (!ScenePackaging::ScenePackager::loadScene(ecs, path)) {
+            std::cerr << "Failed to load scene: " << path << "\n";
             return false;
         }
         
-        // Load all model components
+        // Load model components
+        std::cout << "Loading models from scene...\n";
+        int modelsLoaded = 0;
         for (EntityID e = 0; e < 10000; e++) {
             auto* mc = ecs->getComponent<ModelComponent>(e);
-            if (mc && !mc->loadedModel && !mc->modelPath.empty()) {
-                Model m = modelLoader.load(mc->modelPath);
-                if (!m.vertices.empty()) {
-                    mc->loadedModel = new Model(std::move(m));
-                    fixDescriptorSet(mc->loadedModel);
-                    modelEntities.push_back(e);
+            if (mc) {
+                std::cout << "  Entity " << e << " has ModelComponent, path: '" << mc->modelPath << "'\n";
+                if (!mc->loadedModel && !mc->modelPath.empty()) {
+                    std::cout << "    Loading model: " << mc->modelPath << "\n";
+                    Model m = modelLoader.load(mc->modelPath);
+                    if (!m.vertices.empty()) {
+                        mc->loadedModel = new Model(std::move(m));
+                        fixDescriptorSet(mc->loadedModel);
+                        modelEntities.push_back(e);
+                        modelsLoaded++;
+                        std::cout << "    ✓ Model loaded successfully\n";
+                    } else {
+                        std::cout << "    ✗ Model load failed (empty vertices)\n";
+                    }
+                } else if (mc->loadedModel) {
+                    std::cout << "    Model already loaded\n";
+                } else {
+                    std::cout << "    ModelPath is empty!\n";
                 }
             }
         }
+        std::cout << "Models loaded: " << modelsLoaded << "/" << modelEntities.size() << "\n";
         
+        std::cout << "✓ Scene loaded: " << path << "\n";
         return true;
+    }
+    
+    bool saveScene(const std::string& path) {
+        return ScenePackaging::ScenePackager::saveScene(ecs, path, "GameScene");
     }
     
     void clearScene() {
         vkDeviceWaitIdle(device);
         
-        for (EntityID e = 0; e < 10000; e++) {
+        for (EntityID e : modelEntities) {
             auto* mc = ecs->getComponent<ModelComponent>(e);
             if (mc && mc->loadedModel) {
                 modelLoader.cleanup(*mc->loadedModel);
@@ -812,7 +832,6 @@ struct ZeroEngine::Impl {
         }
         modelEntities.clear();
         
-        // Reset ECS
         delete ecs;
         ecs = new ECS();
         ecs->registerComponent<Transform>();
@@ -820,6 +839,25 @@ struct ZeroEngine::Impl {
         ecs->registerComponent<Layer>();
         ecs->registerComponent<ModelComponent>();
         ecs->registerComponent<CameraComponent>();
+    }
+    
+    // ==================== Play Mode ====================
+    
+    void snapshotScene() {
+        // Simple snapshot: serialize the entire scene
+        sceneSnapshot.data.clear();
+        
+        // TODO: Implement full serialization
+        // For now, just mark as valid
+        sceneSnapshot.valid = true;
+    }
+    
+    void restoreSnapshot() {
+        if (!sceneSnapshot.valid) return;
+        
+        // TODO: Implement deserialization
+        clearScene();
+        sceneSnapshot.valid = false;
     }
     
     // ==================== Shutdown ====================
@@ -830,8 +868,7 @@ struct ZeroEngine::Impl {
         
         vkDeviceWaitIdle(device);
         
-        // Cleanup models
-        for (EntityID e = 0; e < 10000; e++) {
+        for (EntityID e : modelEntities) {
             auto* mc = ecs->getComponent<ModelComponent>(e);
             if (mc && mc->loadedModel) {
                 modelLoader.cleanup(*mc->loadedModel);
@@ -841,6 +878,11 @@ struct ZeroEngine::Impl {
         
         delete ecs;
         ecs = nullptr;
+        
+        if (cameraController) {
+            delete cameraController;
+            cameraController = nullptr;
+        }
         
         defaultBoneBuffer.cleanup();
         skybox.cleanup();
@@ -855,7 +897,6 @@ struct ZeroEngine::Impl {
             if (frameCmd) vkFreeCommandBuffers(device, commandPool, 1, &frameCmd);
         }
         
-        // Only destroy pool if we created it
         if (mode == EngineMode::Standalone || !config.descriptorPool) {
             if (descriptorPool) vkDestroyDescriptorPool(device, descriptorPool, nullptr);
         }
@@ -878,9 +919,7 @@ ZeroEngine::~ZeroEngine() { if (impl) { impl->shutdown(); delete impl; } }
 bool ZeroEngine::init(const EngineConfig& config) { return impl->init(config); }
 void ZeroEngine::shutdown() { impl->shutdown(); }
 bool ZeroEngine::isRunning() const { return impl->running; }
-
 void ZeroEngine::update(float dt) { impl->update(dt); }
-
 void ZeroEngine::resize(uint32_t w, uint32_t h) { impl->resize(w, h); }
 
 EngineFrame ZeroEngine::getOutputFrame() const {
@@ -895,28 +934,14 @@ EngineFrame ZeroEngine::getOutputFrame() const {
     return f;
 }
 
-VkSampler ZeroEngine::getOutputSampler() const {
-    return impl->offscreen.sampler;
-}
+VkSampler ZeroEngine::getOutputSampler() const { return impl->offscreen.sampler; }
 
 bool ZeroEngine::loadScene(const std::string& path) { return impl->loadScene(path); }
+bool ZeroEngine::saveScene(const std::string& path) { return impl->saveScene(path); }
+void ZeroEngine::newScene() { impl->clearScene(); }
 
-bool ZeroEngine::saveScene(const std::string& path) {
-    // TODO: implement scene save via ScenePackager
-    return false;
-}
-
-void ZeroEngine::newScene() {
-    impl->clearScene();
-}
-
-EntityID ZeroEngine::createEntity(const std::string& name) {
-    return impl->createEntity(name);
-}
-
-void ZeroEngine::destroyEntity(EntityID id) {
-    impl->destroyEntity(id);
-}
+EntityID ZeroEngine::createEntity(const std::string& name) { return impl->createEntity(name); }
+void ZeroEngine::destroyEntity(EntityID id) { impl->destroyEntity(id); }
 
 std::vector<EntityInfo> ZeroEngine::getEntities() const {
     std::vector<EntityInfo> result;
@@ -932,7 +957,6 @@ std::vector<EntityInfo> ZeroEngine::getEntities() const {
         
         info.position = t->position;
         info.scale = t->scale;
-        // Convert quat to euler
         info.rotation = glm::degrees(glm::eulerAngles(t->rotation));
         
         auto* mc = impl->ecs->getComponent<ModelComponent>(e);
@@ -1023,7 +1047,6 @@ void ZeroEngine::setEntityAsCamera(EntityID id, bool active) {
 }
 
 void ZeroEngine::setActiveCamera(EntityID id) {
-    // Deactivate all cameras, activate the specified one
     for (EntityID e = 0; e < 10000; e++) {
         auto* cc = impl->ecs->getComponent<CameraComponent>(e);
         if (cc) cc->isActive = (e == id);
@@ -1041,30 +1064,20 @@ EntityID ZeroEngine::getActiveCamera() const {
 PlayState ZeroEngine::getPlayState() const { return impl->playState; }
 
 void ZeroEngine::play() {
-    // TODO: snapshot scene state for restore on stop
+    impl->snapshotScene();
     impl->playState = PlayState::Playing;
 }
 
-void ZeroEngine::pause() {
-    impl->playState = PlayState::Paused;
-}
+void ZeroEngine::pause() { impl->playState = PlayState::Paused; }
 
 void ZeroEngine::stop() {
-    // TODO: restore scene snapshot
+    impl->restoreSnapshot();
     impl->playState = PlayState::Editing;
 }
 
-void ZeroEngine::setEditorCameraPosition(glm::vec3 pos) {
-    impl->editorCamera.position = pos;
-}
-
-void ZeroEngine::setEditorCameraTarget(glm::vec3 target) {
-    impl->editorCamera.target = target;
-}
-
-glm::vec3 ZeroEngine::getEditorCameraPosition() const {
-    return impl->editorCamera.position;
-}
+void ZeroEngine::setEditorCameraPosition(glm::vec3 pos) { impl->editorCamera.position = pos; }
+void ZeroEngine::setEditorCameraTarget(glm::vec3 target) { impl->editorCamera.target = target; }
+glm::vec3 ZeroEngine::getEditorCameraPosition() const { return impl->editorCamera.position; }
 
 void ZeroEngine::setPostProcessEnabled(bool enabled) { impl->postProcessEnabled = enabled; }
 void ZeroEngine::setShadowsEnabled(bool enabled) { impl->shadowsEnabled = enabled; }

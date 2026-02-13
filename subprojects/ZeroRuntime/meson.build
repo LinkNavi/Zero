@@ -9,3 +9,8 @@ executable('ZeroRuntime',
   'src/main.cpp',
   dependencies: zeroengine_dep
 )
+
+executable('SceneCreator',
+  'src/scene_creator.cpp',
+  dependencies: zeroengine_dep
+)
