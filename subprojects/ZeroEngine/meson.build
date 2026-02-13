@@ -27,6 +27,7 @@ engine_sources = files(
   'src/SceneManager.cpp',
   'src/impls.cpp',
   'src/Renderer.cpp',
+  'src/VkBootstrap.cpp',
 )
 
 zeroengine_lib = static_library('ZeroEngine',
@@ -54,11 +55,24 @@ shader_list = [
   ['shaders/composite.frag', 'composite_frag.spv'],
 ]
 
+# Build shaders and get their outputs
+shader_outputs = []
 foreach shader : shader_list
-  custom_target('shader_' + shader[1],
+  shader_target = custom_target('shader_' + shader[1],
     input: shader[0],
     output: shader[1],
     command: [glslc, '@INPUT@', '-o', '@OUTPUT@'],
     build_by_default: true
   )
+  shader_outputs += shader_target
 endforeach
+
+# Copy shaders to project root
+run_target('copy-shaders',
+  command: [
+    'sh', '-c',
+    'mkdir -p ' + meson.project_source_root() + '/../../shaders && ' +
+    'cp ' + meson.current_build_dir() + '/*.spv ' + meson.project_source_root() + '/../../shaders/'
+  ],
+  depends: shader_outputs
+)
