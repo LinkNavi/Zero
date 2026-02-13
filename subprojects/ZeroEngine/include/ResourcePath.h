@@ -7,8 +7,7 @@
 #include <linux/limits.h>
 
 class ResourcePath {
-    static std::string projectRoot;
-    
+  static inline std::string projectRoot;    
 public:
     static void init() {
         // Try to find project root from executable location
@@ -55,4 +54,4 @@ static std::string textures(const std::string& name) {
     }
 };
 
-std::string ResourcePath::projectRoot;
+

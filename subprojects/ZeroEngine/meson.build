@@ -28,6 +28,7 @@ engine_sources = files(
   'src/impls.cpp',
   'src/Renderer.cpp',
   'src/VkBootstrap.cpp',
+  'src/ZeroEngine.cpp'
 )
 
 zeroengine_lib = static_library('ZeroEngine',

@@ -63,6 +63,10 @@ class PostProcessing {
     
     VkFormat depthFormat = VK_FORMAT_D32_SFLOAT;
     
+    // Store shader paths for lazy pipeline creation
+    std::string storedVertPath;
+    std::string storedCompositeFragPath;
+    
     struct BloomPC { float threshold, intensity, texelX, texelY; };
     struct CompositePC { float strength, exposure, gamma, bloomEnabled; };
 
@@ -82,6 +86,10 @@ public:
         bloomWidth = w / 4;
         bloomHeight = h / 4;
         depthFormat = depthFmt;
+        
+        // Store paths for lazy composite pipeline creation
+        storedVertPath = fullscreenVertPath;
+        storedCompositeFragPath = compositeFragPath;
         
         if (!createSampler()) return false;
         if (!createSceneResources()) return false;
@@ -134,13 +142,13 @@ public:
         composite(cmd, swapchainPass, swapchainFB);
         
         // Transition scene image back for next frame
-        transitionImage(cmd, sceneImage,
-                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                       VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-                       VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                       VK_ACCESS_SHADER_READ_BIT,
-                       VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+        // NOTE: not needed because render pass uses initialLayout = UNDEFINED
+        // which means the contents are discarded anyway. But we do it to keep
+        // the image in a known state for the descriptor set.
+        // Actually we skip this - the render pass loadOp=CLEAR + initialLayout=UNDEFINED
+        // handles it. The image just needs to be in COLOR_ATTACHMENT_OPTIMAL
+        // before the next applyPostProcess transition, and the render pass finalLayout
+        // sets it to COLOR_ATTACHMENT_OPTIMAL.
     }
     
     void cleanup() {
@@ -193,12 +201,12 @@ private:
     }
     
     bool createSceneResources() {
-        // Scene color image
+        // Scene color image (HDR)
         VkImageCreateInfo imgInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         imgInfo.imageType = VK_IMAGE_TYPE_2D;
         imgInfo.extent = {width, height, 1};
         imgInfo.mipLevels = imgInfo.arrayLayers = 1;
-        imgInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT; // HDR format
+        imgInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
         imgInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
         imgInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
         imgInfo.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -234,13 +242,15 @@ private:
         
         // Scene render pass
         VkAttachmentDescription attachments[2] = {};
+        // Color attachment - use UNDEFINED initial layout since we clear anyway
         attachments[0].format = VK_FORMAT_R16G16B16A16_SFLOAT;
         attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
         attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        attachments[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;  // FIX: was COLOR_ATTACHMENT_OPTIMAL
         attachments[0].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
         
+        // Depth attachment
         attachments[1].format = depthFormat;
         attachments[1].samples = VK_SAMPLE_COUNT_1_BIT;
         attachments[1].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
@@ -394,9 +404,17 @@ private:
         // Update composite descriptor (scene + bloom)
         VkDescriptorImageInfo bloomInfo{linearSampler, bloomView, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkWriteDescriptorSet writes[2] = {};
-        writes[0] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, compositeDescSet, 0, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER};
+        writes[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[0].dstSet = compositeDescSet;
+        writes[0].dstBinding = 0;
+        writes[0].descriptorCount = 1;
+        writes[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writes[0].pImageInfo = &sceneInfo;
-        writes[1] = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, nullptr, compositeDescSet, 1, 0, 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER};
+        writes[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        writes[1].dstSet = compositeDescSet;
+        writes[1].dstBinding = 1;
+        writes[1].descriptorCount = 1;
+        writes[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         writes[1].pImageInfo = &bloomInfo;
         vkUpdateDescriptorSets(device, 2, writes, 0, nullptr);
         
@@ -405,7 +423,7 @@ private:
     
     bool createPipelines(const std::string& vertPath, const std::string& bloomPath, const std::string& compositePath) {
         auto vert = readFile(vertPath);
-        if (vert.empty()) { std::cerr << "PostProcess: no vert shader\n"; return false; }
+        if (vert.empty()) { std::cerr << "PostProcess: no vert shader at " << vertPath << "\n"; return false; }
         
         VkShaderModule vertMod = createShader(vert);
         
@@ -420,9 +438,11 @@ private:
             li.pPushConstantRanges = &pc;
             vkCreatePipelineLayout(device, &li, nullptr, &bloomLayout);
             bloomPipeline = makePipeline(vertMod, createShader(bloom), bloomLayout, bloomRenderPass, false);
+        } else {
+            std::cerr << "PostProcess: no bloom shader at " << bloomPath << "\n";
         }
         
-        // Composite pipeline
+        // Composite pipeline layout
         auto comp = readFile(compositePath);
         if (!comp.empty()) {
             VkPushConstantRange pc{VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(CompositePC)};
@@ -432,23 +452,14 @@ private:
             li.pushConstantRangeCount = 1;
             li.pPushConstantRanges = &pc;
             vkCreatePipelineLayout(device, &li, nullptr, &compositeLayout);
+            std::cout << "  Composite layout created\n";
+        } else {
+            std::cerr << "PostProcess: no composite shader at " << compositePath << "\n";
         }
         
         vkDestroyShaderModule(device, vertMod, nullptr);
-        return bloomPipeline != VK_NULL_HANDLE;
-    }
-    
-    // Create composite pipeline for a specific swapchain render pass
-    void ensureCompositePipeline(VkRenderPass swapchainPass) {
-        if (compositePipeline) return;
-        
-        auto vert = readFile("shaders/fullscreen_vert.spv");
-        auto comp = readFile("shaders/composite_frag.spv");
-        if (vert.empty() || comp.empty()) return;
-        
-        VkShaderModule vertMod = createShader(vert);
-        compositePipeline = makePipeline(vertMod, createShader(comp), compositeLayout, swapchainPass, false);
-        vkDestroyShaderModule(device, vertMod, nullptr);
+        // Bloom pipeline might be null if bloom shader missing, that's ok
+        return true;
     }
     
     VkPipeline makePipeline(VkShaderModule vert, VkShaderModule frag, VkPipelineLayout layout,
@@ -511,8 +522,13 @@ private:
         ci.renderPass = rp;
         
         VkPipeline p;
-        vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &ci, nullptr, &p);
+        VkResult result = vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &ci, nullptr, &p);
         vkDestroyShaderModule(device, frag, nullptr);
+        
+        if (result != VK_SUCCESS) {
+            std::cerr << "PostProcess: failed to create pipeline (VkResult " << result << ")\n";
+            return VK_NULL_HANDLE;
+        }
         return p;
     }
     
@@ -542,16 +558,53 @@ private:
     void composite(VkCommandBuffer cmd, VkRenderPass swapchainPass, VkFramebuffer swapchainFB) {
         // Lazily create composite pipeline for swapchain render pass
         if (!compositePipeline && compositeLayout) {
-            auto vert = readFile("shaders/fullscreen_vert.spv");
-            auto comp = readFile("shaders/composite_frag.spv");
+            std::cout << "Creating composite pipeline lazily...\n";
+            std::cout << "  Vert: " << storedVertPath << "\n";
+            std::cout << "  Frag: " << storedCompositeFragPath << "\n";
+            
+            auto vert = readFile(storedVertPath);
+            auto comp = readFile(storedCompositeFragPath);
+            
+            if (vert.empty()) {
+                std::cerr << "ERROR: Cannot read fullscreen vert shader: " << storedVertPath << "\n";
+            }
+            if (comp.empty()) {
+                std::cerr << "ERROR: Cannot read composite frag shader: " << storedCompositeFragPath << "\n";
+            }
+            
             if (!vert.empty() && !comp.empty()) {
                 VkShaderModule vertMod = createShader(vert);
                 compositePipeline = makePipeline(vertMod, createShader(comp), compositeLayout, swapchainPass, false);
                 vkDestroyShaderModule(device, vertMod, nullptr);
+                
+                if (compositePipeline) {
+                    std::cout << "✓ Composite pipeline created\n";
+                } else {
+                    std::cerr << "ERROR: Composite pipeline creation failed!\n";
+                }
             }
         }
         
-        if (!compositePipeline) return;
+        if (!compositePipeline) {
+            static bool warned = false;
+            if (!warned) {
+                std::cerr << "ERROR: No composite pipeline - rendering will be blank!\n";
+                warned = true;
+            }
+            
+            // Fallback: just begin+end the swapchain render pass so we don't crash
+            VkRenderPassBeginInfo rpbi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+            rpbi.renderPass = swapchainPass;
+            rpbi.framebuffer = swapchainFB;
+            rpbi.renderArea = {{0, 0}, {width, height}};
+            std::array<VkClearValue, 2> clearValues{};
+            clearValues[0].color = {{1.0f, 0.0f, 1.0f, 1.0f}}; // Magenta = error indicator
+            clearValues[1].depthStencil = {1.0f, 0};
+            rpbi.clearValueCount = 2;
+            rpbi.pClearValues = clearValues.data();
+            vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+            return;
+        }
         
         VkRenderPassBeginInfo rpbi{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
         rpbi.renderPass = swapchainPass;
@@ -578,7 +631,7 @@ private:
         vkCmdPushConstants(cmd, compositeLayout, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
         vkCmdDraw(cmd, 3, 1, 0, 0);
         
-        // Don't end render pass - let UI render in same pass
+        // Don't end render pass - let caller end it (for UI rendering in same pass)
     }
     
     std::vector<char> readFile(const std::string& p) {
