@@ -158,18 +158,29 @@ class ModelLoader {
     std::vector<BoneInfo> tempBones;
     
 public:
-    bool init(VkDevice dev, VmaAllocator alloc, VkCommandPool cmdPool, VkQueue q,
-              VkDescriptorPool descPool, VkDescriptorSetLayout descLayout) {
-        device = dev;
-        allocator = alloc;
-        commandPool = cmdPool;
-        queue = q;
-        descriptorPool = descPool;
-        descriptorSetLayout = descLayout;
-        
-        createDefaultTextures();
-        return true;
+   bool init(VkDevice dev, VmaAllocator alloc, VkCommandPool cmdPool, VkQueue q,
+          VkDescriptorPool descPool, VkDescriptorSetLayout descLayout) {
+    device = dev;
+    allocator = alloc;
+    commandPool = cmdPool;
+    queue = q;
+    descriptorPool = descPool;
+    descriptorSetLayout = descLayout;
+    
+    std::cout << "ModelLoader::init() - Creating default textures..." << std::endl;
+    createDefaultTextures();
+    
+    std::cout << "ModelLoader::init() - Checking default textures..." << std::endl;
+    std::cout << "  defaultWhiteTexture.view = " << defaultWhiteTexture.view << std::endl;
+    std::cout << "  defaultWhiteTexture.sampler = " << defaultWhiteTexture.sampler << std::endl;
+    
+    if (defaultWhiteTexture.view == VK_NULL_HANDLE || defaultWhiteTexture.sampler == VK_NULL_HANDLE) {
+        std::cerr << "FATAL: Failed to create default white texture in init()!" << std::endl;
+        return false;
     }
+    
+    return true;
+}
     
     Model load(const std::string& path) {
         Model model;
@@ -435,113 +446,129 @@ private:
         return texture;
     }
     
-    void createTextureImage(const unsigned char* data, int width, int height, Texture& texture) {
-        VkDeviceSize imageSize = width * height * 4;
-        
-        VkBuffer stagingBuffer;
-        VmaAllocation stagingAlloc;
-        
-        VkBufferCreateInfo bufferInfo{};
-        bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-        bufferInfo.size = imageSize;
-        bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-        bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        
-        VmaAllocationCreateInfo allocInfo{};
-        allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
-        
-        vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAlloc, nullptr);
-        
-        void* mapped;
-        vmaMapMemory(allocator, stagingAlloc, &mapped);
-        memcpy(mapped, data, imageSize);
-        vmaUnmapMemory(allocator, stagingAlloc);
-        
-        VkImageCreateInfo imageInfo{};
-        imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-        imageInfo.imageType = VK_IMAGE_TYPE_2D;
-        imageInfo.extent = {(uint32_t)width, (uint32_t)height, 1};
-        imageInfo.mipLevels = 1;
-        imageInfo.arrayLayers = 1;
-        imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-        imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-        imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-        imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-        imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        
-        VmaAllocationCreateInfo imgAllocInfo{};
-        imgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-        
-        vmaCreateImage(allocator, &imageInfo, &imgAllocInfo, &texture.image, &texture.allocation, nullptr);
-        
-        VkCommandBuffer cmd = beginSingleTimeCommands();
-        
-        VkImageMemoryBarrier barrier{};
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = texture.image;
-        barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = 1;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
-        barrier.srcAccessMask = 0;
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
-        
-        VkBufferImageCopy region{};
-        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        region.imageSubresource.mipLevel = 0;
-        region.imageSubresource.baseArrayLayer = 0;
-        region.imageSubresource.layerCount = 1;
-        region.imageExtent = {(uint32_t)width, (uint32_t)height, 1};
-        
-        vkCmdCopyBufferToImage(cmd, stagingBuffer, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
-        
-        barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
-        barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        
-        vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            0, 0, nullptr, 0, nullptr, 1, &barrier);
-        
-        endSingleTimeCommands(cmd);
-        
-        vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
-        
-        VkImageViewCreateInfo viewInfo{};
-        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        viewInfo.image = texture.image;
-        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
-        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        viewInfo.subresourceRange.baseMipLevel = 0;
-        viewInfo.subresourceRange.levelCount = 1;
-        viewInfo.subresourceRange.baseArrayLayer = 0;
-        viewInfo.subresourceRange.layerCount = 1;
-        vkCreateImageView(device, &viewInfo, nullptr, &texture.view);
-        
-        VkSamplerCreateInfo samplerInfo{};
-        samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-        samplerInfo.magFilter = VK_FILTER_LINEAR;
-        samplerInfo.minFilter = VK_FILTER_LINEAR;
-        samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        samplerInfo.maxLod = 1.0f;
-        vkCreateSampler(device, &samplerInfo, nullptr, &texture.sampler);
-        
-        texture.width = width;
-        texture.height = height;
+   void createTextureImage(const unsigned char* data, int width, int height, Texture& texture) {
+    VkDeviceSize imageSize = width * height * 4;
+    
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAlloc;
+    
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = imageSize;
+    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+    
+    if (vmaCreateBuffer(allocator, &bufferInfo, &allocInfo, &stagingBuffer, &stagingAlloc, nullptr) != VK_SUCCESS) {
+        std::cerr << "Failed to create staging buffer for texture" << std::endl;
+        return;
     }
     
+    void* mapped;
+    vmaMapMemory(allocator, stagingAlloc, &mapped);
+    memcpy(mapped, data, imageSize);
+    vmaUnmapMemory(allocator, stagingAlloc);
+    
+    VkImageCreateInfo imageInfo{};
+    imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.extent = {(uint32_t)width, (uint32_t)height, 1};
+    imageInfo.mipLevels = 1;
+    imageInfo.arrayLayers = 1;
+    imageInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+    imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    imageInfo.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    
+    VmaAllocationCreateInfo imgAllocInfo{};
+    imgAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+    
+    if (vmaCreateImage(allocator, &imageInfo, &imgAllocInfo, &texture.image, &texture.allocation, nullptr) != VK_SUCCESS) {
+        std::cerr << "Failed to create texture image" << std::endl;
+        vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
+        return;
+    }
+    
+    VkCommandBuffer cmd = beginSingleTimeCommands();
+    
+    VkImageMemoryBarrier barrier{};
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    barrier.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = texture.image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+    
+    VkBufferImageCopy region{};
+    region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = 0;
+    region.imageSubresource.layerCount = 1;
+    region.imageExtent = {(uint32_t)width, (uint32_t)height, 1};
+    
+    vkCmdCopyBufferToImage(cmd, stagingBuffer, texture.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+    
+    endSingleTimeCommands(cmd);
+    
+    vmaDestroyBuffer(allocator, stagingBuffer, stagingAlloc);
+    
+    // Create image view
+    VkImageViewCreateInfo viewInfo{};
+    viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    viewInfo.image = texture.image;
+    viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    viewInfo.format = VK_FORMAT_R8G8B8A8_SRGB;
+    viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    viewInfo.subresourceRange.baseMipLevel = 0;
+    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.baseArrayLayer = 0;
+    viewInfo.subresourceRange.layerCount = 1;
+    
+    if (vkCreateImageView(device, &viewInfo, nullptr, &texture.view) != VK_SUCCESS) {
+        std::cerr << "Failed to create texture image view" << std::endl;
+        return;
+    }
+    
+    // Create sampler
+    VkSamplerCreateInfo samplerInfo{};
+    samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+    samplerInfo.magFilter = VK_FILTER_LINEAR;
+    samplerInfo.minFilter = VK_FILTER_LINEAR;
+    samplerInfo.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+    samplerInfo.maxLod = 1.0f;
+    
+    if (vkCreateSampler(device, &samplerInfo, nullptr, &texture.sampler) != VK_SUCCESS) {
+        std::cerr << "Failed to create texture sampler" << std::endl;
+        return;
+    }
+    
+    texture.width = width;
+    texture.height = height;
+}    
     void processNode(aiNode* node, const aiScene* scene, Model& model, glm::mat4 parentTransform) {
         glm::mat4 nodeTransform = parentTransform * aiToGlm(node->mTransformation);
         
@@ -778,18 +805,57 @@ private:
         vmaDestroyBuffer(allocator, stagingIB, stagingIBAlloc);
     }
     
-   void createDescriptorSet(Model& model) {
+ 
+    
+ void createDefaultTextures() {
+    std::cout << "Creating default textures..." << std::endl;
+    
+    // Create a MAGENTA default texture instead of white (more visible for debugging)
+    uint32_t magenta = 0xFFFF00FF;  // RGBA: magenta
+    createTextureImage(reinterpret_cast<const unsigned char*>(&magenta), 1, 1, defaultWhiteTexture);
+    
+    if (defaultWhiteTexture.view == VK_NULL_HANDLE || defaultWhiteTexture.sampler == VK_NULL_HANDLE) {
+        std::cerr << "ERROR: Failed to create default texture!" << std::endl;
+    } else {
+        std::cout << "✓ Default magenta texture created (for debugging)" << std::endl;
+    }
+    
+    uint32_t normal = 0xFFFF8080;
+    createTextureImage(reinterpret_cast<const unsigned char*>(&normal), 1, 1, defaultNormalTexture);
+}
+
+void createDescriptorSet(Model& model) {
     VkDescriptorSetAllocateInfo allocInfo{};
     allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
     allocInfo.descriptorPool = descriptorPool;
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &descriptorSetLayout;
-    vkAllocateDescriptorSets(device, &allocInfo, &model.descriptorSet);
+    
+    if (vkAllocateDescriptorSets(device, &allocInfo, &model.descriptorSet) != VK_SUCCESS) {
+        std::cerr << "Failed to allocate descriptor set for model" << std::endl;
+        return;
+    }
     
     // Use first texture or default white
     Texture* albedo = &defaultWhiteTexture;
     if (!model.textures.empty() && model.textures[0].view != VK_NULL_HANDLE) {
         albedo = &model.textures[0];
+    }
+    
+    // Safety check
+    if (albedo->view == VK_NULL_HANDLE || albedo->sampler == VK_NULL_HANDLE) {
+        std::cerr << "ERROR: No valid texture available for descriptor set!" << std::endl;
+        std::cerr << "  view=" << albedo->view << " sampler=" << albedo->sampler << std::endl;
+        std::cerr << "  defaultWhiteTexture.view=" << defaultWhiteTexture.view 
+                  << " sampler=" << defaultWhiteTexture.sampler << std::endl;
+        
+        // Don't crash - just use whatever we have (even if NULL, better than segfault)
+        // The rendering will be broken but at least we can debug
+        if (defaultWhiteTexture.view == VK_NULL_HANDLE) {
+            std::cerr << "CRITICAL: Default white texture was never created properly!" << std::endl;
+            return; // Skip descriptor update entirely
+        }
+        albedo = &defaultWhiteTexture;
     }
     
     VkDescriptorImageInfo imageInfo{};
@@ -807,14 +873,6 @@ private:
     
     vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
 }
-    
-    void createDefaultTextures() {
-        uint32_t white = 0xFFFFFFFF;
-        createTextureImage(reinterpret_cast<const unsigned char*>(&white), 1, 1, defaultWhiteTexture);
-        
-        uint32_t normal = 0xFFFF8080;
-        createTextureImage(reinterpret_cast<const unsigned char*>(&normal), 1, 1, defaultNormalTexture);
-    }
     
     VkCommandBuffer beginSingleTimeCommands() {
         VkCommandBufferAllocateInfo allocInfo{};
