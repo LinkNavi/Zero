@@ -60,11 +60,12 @@ class VulkanRenderer {
     uint32_t width, height;
     uint32_t currentFrame = 0;
     uint32_t imageIndex = 0;
+    bool framebufferResized = false;
 
 public:
     bool init(uint32_t w, uint32_t h, const char* title);
 
-	uint32_t getWindowWidth() const { return windowWidth; }
+    uint32_t getWindowWidth() const { return windowWidth; }
     uint32_t getWindowHeight() const { return windowHeight; }
     float getContentScale() const {
         float x, y;
@@ -77,14 +78,19 @@ public:
     }
     VkInstance getInstance() const { return instance; }
 
-    // Begin frame - acquires image and begins command buffer (no render pass)
-    void beginFrame(VkCommandBuffer& cmd) {
+    // Begin frame - acquires image and begins command buffer
+    // Returns false if frame should be skipped (resize in progress)
+    bool beginFrame(VkCommandBuffer& cmd) {
         vkWaitForFences(device, 1, &inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
 
         VkResult result = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX,
             imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
 
-        if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) return;
+        if (result == VK_ERROR_OUT_OF_DATE_KHR) {
+            recreateSwapchain();
+            return false;
+        }
+        if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR) return false;
 
         vkResetFences(device, 1, &inFlightFences[currentFrame]);
 
@@ -95,9 +101,9 @@ public:
         beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkBeginCommandBuffer(cmd, &beginInfo);
+        return true;
     }
 
-    // Get current framebuffer for main render pass
     VkFramebuffer getCurrentFramebuffer() const {
         return framebuffers[imageIndex];
     }
@@ -149,7 +155,9 @@ public:
         io.AddMouseButtonEvent(0, glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS);
         io.AddMouseButtonEvent(1, glfwGetMouseButton(window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS);
     }
-VkImage getCurrentSwapchainImage() const { return swapchainImages[imageIndex]; }
+
+    VkImage getCurrentSwapchainImage() const { return swapchainImages[imageIndex]; }
+
     void imguiRender(VkCommandBuffer cmd) {
         ImGui::Render();
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), cmd);
@@ -162,7 +170,7 @@ VkImage getCurrentSwapchainImage() const { return swapchainImages[imageIndex]; }
         if (imguiPool) vkDestroyDescriptorPool(device, imguiPool, nullptr);
     }
 
-    // End frame - submits and presents (expects render pass already ended)
+    // End frame - submits and presents
     void endFrame(VkCommandBuffer cmd) {
         vkEndCommandBuffer(cmd);
 
@@ -187,9 +195,47 @@ VkImage getCurrentSwapchainImage() const { return swapchainImages[imageIndex]; }
         presentInfo.pSwapchains = &swapchain;
         presentInfo.pImageIndices = &imageIndex;
 
-        vkQueuePresentKHR(presentQueue, &presentInfo);
+        VkResult result = vkQueuePresentKHR(presentQueue, &presentInfo);
+
+        if (result == VK_ERROR_OUT_OF_DATE_KHR || result == VK_SUBOPTIMAL_KHR || framebufferResized) {
+            framebufferResized = false;
+            recreateSwapchain();
+        }
 
         currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+    }
+
+    // ==================== Resize / Swapchain Recreation ====================
+
+    void recreateSwapchain() {
+        // Wait until window is not minimized
+        int w = 0, h = 0;
+        glfwGetFramebufferSize(window, &w, &h);
+        while (w == 0 || h == 0) {
+            glfwGetFramebufferSize(window, &w, &h);
+            glfwWaitEvents();
+        }
+
+        vkDeviceWaitIdle(device);
+
+        cleanupSwapchain();
+
+        width = static_cast<uint32_t>(w);
+        height = static_cast<uint32_t>(h);
+        windowWidth = width;
+        windowHeight = height;
+
+        createSwapchain();
+        createDepthResources();
+        createFramebuffers();
+    }
+
+    void setupResizeCallback() {
+        glfwSetWindowUserPointer(window, this);
+        glfwSetFramebufferSizeCallback(window, [](GLFWwindow* win, int, int) {
+            auto* r = reinterpret_cast<VulkanRenderer*>(glfwGetWindowUserPointer(win));
+            r->framebufferResized = true;
+        });
     }
 
     bool shouldClose() { return glfwWindowShouldClose(window); }
@@ -216,18 +262,9 @@ VkImage getCurrentSwapchainImage() const { return swapchainImages[imageIndex]; }
 
         vkDestroyCommandPool(device, commandPool, nullptr);
 
-        for (auto fb : framebuffers)
-            vkDestroyFramebuffer(device, fb, nullptr);
-
-        vkDestroyImageView(device, depthImage.view, nullptr);
-        vmaDestroyImage(allocator, depthImage.image, depthImage.allocation);
+        cleanupSwapchain();
 
         vkDestroyRenderPass(device, renderPass, nullptr);
-
-        for (auto view : swapchainImageViews)
-            vkDestroyImageView(device, view, nullptr);
-
-        vkDestroySwapchainKHR(device, swapchain, nullptr);
         vmaDestroyAllocator(allocator);
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyDevice(device, nullptr);
@@ -238,6 +275,24 @@ VkImage getCurrentSwapchainImage() const { return swapchainImages[imageIndex]; }
     }
 
 private:
+    void cleanupSwapchain() {
+        for (auto fb : framebuffers)
+            vkDestroyFramebuffer(device, fb, nullptr);
+        framebuffers.clear();
+
+        vkDestroyImageView(device, depthImage.view, nullptr);
+        vmaDestroyImage(allocator, depthImage.image, depthImage.allocation);
+        depthImage = {};
+
+        for (auto view : swapchainImageViews)
+            vkDestroyImageView(device, view, nullptr);
+        swapchainImageViews.clear();
+        swapchainImages.clear();
+
+        vkDestroySwapchainKHR(device, swapchain, nullptr);
+        swapchain = VK_NULL_HANDLE;
+    }
+
     VkFormat findDepthFormat() {
         std::vector<VkFormat> candidates = {
             VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT};
@@ -253,6 +308,8 @@ private:
     }
 
     bool createDepthResources() {
+        depthFormat = findDepthFormat();
+
         VkImageCreateInfo imageInfo{};
         imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -292,9 +349,9 @@ private:
 
     bool createSwapchain();
 
-	bool createRenderPass() {
+    bool createRenderPass() {
         VkAttachmentDescription colorAttachment = {};
-         colorAttachment.format = VK_FORMAT_B8G8R8A8_SRGB;
+        colorAttachment.format = VK_FORMAT_B8G8R8A8_SRGB;
         colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
         colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -373,7 +430,7 @@ private:
         return true;
     }
 
-    bool createCommandPool(); 
+    bool createCommandPool();
     bool createCommandBuffers() {
         commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 

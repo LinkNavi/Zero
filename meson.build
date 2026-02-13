@@ -1,7 +1,9 @@
 project('Zero', 'cpp')
 
 subproject('ZeroEngine')
+
 subproject('ZeroRuntime')
+subproject('ZeroEditor')
 
 
 run_command('mkdir', '-p', 'shaders', check: false)
