@@ -24,28 +24,31 @@ struct Transform : Component {
         setEulerAngles(eulerAngles);
     }
     
-    // Get local transform matrix
-    glm::mat4 getLocalMatrix() const {
-        glm::mat4 mat = glm::mat4(1.0f);
-        mat = glm::translate(mat, position);
-        mat = mat * glm::toMat4(rotation);
-        mat = glm::scale(mat, scale);
-        return mat;
+   glm::mat4 getLocalMatrix() const {
+    glm::mat4 mat = glm::translate(glm::mat4(1.0f), position);
+    mat = mat * glm::mat4_cast(rotation);
+    mat = glm::scale(mat, scale);
+    return mat;
+}
+
+// Add this new method
+glm::mat4 getWorldMatrix(ECS* ecs) const {
+    glm::mat4 local = getLocalMatrix();
+    
+    if (parent == 0) {
+        return local;
     }
     
-    // Get world transform matrix (including parent transforms)
-    glm::mat4 getWorldMatrix(ECS* ecs) const {
-        if (parent == 0) {
-            return getLocalMatrix();
-        }
-        
-        auto* parentTransform = ecs->getComponent<Transform>(parent);
-        if (parentTransform) {
-            return parentTransform->getWorldMatrix(ecs) * getLocalMatrix();
-        }
-        
-        return getLocalMatrix();
+    // Get parent's world matrix recursively
+    auto* parentTransform = ecs->getComponent<Transform>(parent);
+    if (parentTransform) {
+        return parentTransform->getWorldMatrix(ecs) * local;
     }
+    
+    return local;
+}
+    
+   
     
     // Get world position
     glm::vec3 getWorldPosition(ECS* ecs) const {

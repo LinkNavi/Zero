@@ -70,7 +70,8 @@ private:
     std::vector<LogEntry> consoleLogs;
     bool consoleAutoScroll = true;
     int consoleFilter = -1; // -1 = all
-
+EntityID renamingEntity = INVALID_ENTITY;
+char renameBuffer[256] = "";
     // Styling
     ImFont* fontRegular = nullptr;
     ImFont* fontBold = nullptr;

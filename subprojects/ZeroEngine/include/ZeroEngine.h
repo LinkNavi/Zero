@@ -91,12 +91,13 @@ struct EntityInfo {
     EntityID id = INVALID_ENTITY;
     std::string name;
     glm::vec3 position{0};
-    glm::vec3 rotation{0};  // euler degrees for editor display
+    glm::vec3 rotation{0};
     glm::vec3 scale{1};
-    std::string modelPath;
     bool hasModel = false;
+    std::string modelPath;
     bool isCamera = false;
     bool isActiveCamera = false;
+    EntityID parent = 0;  // Add this
 };
 
 class ZeroEngine {
@@ -141,7 +142,12 @@ public:
     
     EntityID createEntity(const std::string& name = "Entity");
     void destroyEntity(EntityID id);
-    
+    // Entity hierarchy operations
+void setEntityName(EntityID id, const std::string& name);
+void setEntityParent(EntityID id, EntityID parentId);
+void removeEntityParent(EntityID id);
+EntityID getEntityParent(EntityID id) const;
+std::vector<EntityID> getEntityChildren(EntityID id) const;
     // Get all entities in scene
     std::vector<EntityInfo> getEntities() const;
     

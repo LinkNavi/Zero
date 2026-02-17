@@ -190,7 +190,7 @@ struct ZeroEngine::Impl {
     EngineMode mode = EngineMode::Standalone;
     PlayState playState = PlayState::Editing;
     bool running = false;
-    
+  
     // Vulkan context
     VkDevice device = VK_NULL_HANDLE;
     VkPhysicalDevice physicalDevice = VK_NULL_HANDLE;
@@ -242,11 +242,12 @@ struct ZeroEngine::Impl {
     std::vector<EntityID> modelEntities;
     
     // Snapshot for play mode
-    struct SceneSnapshot {
-        std::vector<uint8_t> data;
-        bool valid = false;
-    } sceneSnapshot;
-    
+   struct SceneSnapshot {
+    std::vector<EntityInfo> entities;
+    std::unordered_map<EntityID, EntityID> parentMap;
+};
+
+SceneSnapshot sceneSnapshot;
     // ==================== Init ====================
     
     bool init(const EngineConfig& cfg) {
@@ -589,59 +590,58 @@ struct ZeroEngine::Impl {
     }
     
     void renderScene(VkCommandBuffer cmd, Camera* cam) {
-        if (skyboxEnabled) {
-            skybox.render(cmd, cam->getViewMatrix(), cam->getProjectionMatrix());
-        }
-        
-        pipeline.bind(cmd);
-        
-        int rendered = 0;
-        for (EntityID e = 0; e < 10000; e++) {
-            auto* transform = ecs->getComponent<Transform>(e);
-            auto* mc = ecs->getComponent<ModelComponent>(e);
-            if (!transform || !mc || !mc->loadedModel) continue;
-            
-            Model* model = mc->loadedModel;
-            if (!model->vertexBuffer || !model->indexBuffer) continue;
-            if (!model->descriptorSet || !model->totalIndices) continue;
-            
-            PushConstants pc{};
-            pc.viewProj = cam->getProjectionMatrix() * cam->getViewMatrix();
-            pc.model = transform->getLocalMatrix();
-            pc.lightViewProj = shadowsEnabled ? shadowMap.lightViewProj : glm::mat4(1.0f);
-            pc.lightDir = lightDir;
-            pc.ambientStrength = ambientStrength;
-            pc.lightColor = lightColor;
-            pc.shadowBias = shadowsEnabled ? shadowMap.bias : 0.0f;
-            pc.cameraPos = cam->position;
-            pc.fogDensity = 0.0f;
-            pc.fogColor = glm::vec3(0.5f);
-            pc.fogStart = 10.0f;
-            pc.fogEnd = 50.0f;
-            pc.emissionStrength = 0.0f;
-            pc.useExponentialFog = 0.0f;
-            pc.numPointLights = 0;
-            
-            vkCmdPushConstants(cmd, pipeline.getPipelineLayout(),
-                             VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
-                             0, sizeof(PushConstants), &pc);
-            
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                                   pipeline.getPipelineLayout(), 0, 1,
-                                   &model->descriptorSet, 0, nullptr);
-            
-            VkDeviceSize offset = 0;
-            vkCmdBindVertexBuffers(cmd, 0, 1, &model->vertexBuffer, &offset);
-            vkCmdBindIndexBuffer(cmd, model->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
-            vkCmdDrawIndexed(cmd, model->totalIndices, 1, 0, 0, 0);
-            rendered++;
-        }
-        
-        if (frameCount == 0) {
-            std::cout << "First frame: rendered " << rendered << " models\n";
-        }
+    if (skyboxEnabled) {
+        skybox.render(cmd, cam->getViewMatrix(), cam->getProjectionMatrix());
     }
     
+    pipeline.bind(cmd);
+    
+    int rendered = 0;
+    for (EntityID e = 0; e < 10000; e++) {
+        auto* transform = ecs->getComponent<Transform>(e);
+        auto* mc = ecs->getComponent<ModelComponent>(e);
+        if (!transform || !mc || !mc->loadedModel) continue;
+        
+        Model* model = mc->loadedModel;
+        if (!model->vertexBuffer || !model->indexBuffer) continue;
+        if (!model->descriptorSet || !model->totalIndices) continue;
+        
+        PushConstants pc{};
+        pc.viewProj = cam->getProjectionMatrix() * cam->getViewMatrix();
+        pc.model = transform->getWorldMatrix(ecs);  // Changed from getLocalMatrix()
+        pc.lightViewProj = shadowsEnabled ? shadowMap.lightViewProj : glm::mat4(1.0f);
+        pc.lightDir = lightDir;
+        pc.ambientStrength = ambientStrength;
+        pc.lightColor = lightColor;
+        pc.shadowBias = shadowsEnabled ? shadowMap.bias : 0.0f;
+        pc.cameraPos = cam->position;
+        pc.fogDensity = 0.0f;
+        pc.fogColor = glm::vec3(0.5f);
+        pc.fogStart = 10.0f;
+        pc.fogEnd = 50.0f;
+        pc.emissionStrength = 0.0f;
+        pc.useExponentialFog = 0.0f;
+        pc.numPointLights = 0;
+        
+        vkCmdPushConstants(cmd, pipeline.getPipelineLayout(),
+                         VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                         0, sizeof(PushConstants), &pc);
+        
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                               pipeline.getPipelineLayout(), 0, 1,
+                               &model->descriptorSet, 0, nullptr);
+        
+        VkDeviceSize offset = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &model->vertexBuffer, &offset);
+        vkCmdBindIndexBuffer(cmd, model->indexBuffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, model->totalIndices, 1, 0, 0, 0);
+        rendered++;
+    }
+    
+    if (frameCount == 0) {
+        std::cout << "First frame: rendered " << rendered << " models\n";
+    }
+}    
     // ==================== Camera helpers ====================
     
     Camera* getActiveCamera() {
@@ -843,22 +843,95 @@ struct ZeroEngine::Impl {
     
     // ==================== Play Mode ====================
     
-    void snapshotScene() {
-        // Simple snapshot: serialize the entire scene
-        sceneSnapshot.data.clear();
+void snapshotScene() {
+    sceneSnapshot.entities.clear();
+    sceneSnapshot.parentMap.clear();
+    
+    for (size_t i = 0; i < 10000; i++) {
+        auto* t = ecs->getComponent<Transform>(i);
+        if (!t) continue;
         
-        // TODO: Implement full serialization
-        // For now, just mark as valid
-        sceneSnapshot.valid = true;
+        EntityInfo info;
+        info.id = i;
+        
+        auto* tag = ecs->getComponent<Tag>(i);
+        if (tag) info.name = tag->name;
+        
+        info.position = t->position;
+        info.rotation = t->getEulerAngles();
+        info.scale = t->scale;
+        
+        auto* model = ecs->getComponent<ModelComponent>(i);
+        if (model) {
+            info.hasModel = true;
+            info.modelPath = model->modelPath;
+        }
+        
+        auto* cam = ecs->getComponent<CameraComponent>(i);
+        if (cam) {
+            info.isCamera = true;
+            info.isActiveCamera = cam->isActive;
+        }
+        
+        sceneSnapshot.entities.push_back(info);
+        if (t->parent != 0) {
+            sceneSnapshot.parentMap[i] = t->parent;
+        }
+    }
+}
+
+void restoreSnapshot() {
+    if (sceneSnapshot.entities.empty()) return;
+    
+    ecs->clear();
+    
+    std::unordered_map<EntityID, EntityID> oldToNew;
+    
+    for (const auto& info : sceneSnapshot.entities) {
+        EntityID newId = ecs->createEntity();
+        oldToNew[info.id] = newId;
+        
+        Transform t;
+        t.position = info.position;
+        t.setEulerAngles(info.rotation);
+        t.scale = info.scale;
+        ecs->addComponent(newId, t);
+        
+        if (!info.name.empty()) {
+            ecs->addComponent(newId, Tag(info.name));
+        }
+        
+        ecs->addComponent(newId, Layer());
+        
+        if (info.hasModel) {
+            ModelComponent mc(info.modelPath);
+            Model m = modelLoader.load(info.modelPath);
+            if (!m.vertices.empty()) {
+                mc.loadedModel = new Model(std::move(m));
+                fixDescriptorSet(mc.loadedModel);
+            }
+            ecs->addComponent(newId, mc);
+        }
+        
+        if (info.isCamera) {
+            CameraComponent cc;
+            cc.isActive = info.isActiveCamera;
+            ecs->addComponent(newId, cc);
+        }
     }
     
-    void restoreSnapshot() {
-        if (!sceneSnapshot.valid) return;
+    for (const auto& [oldChild, oldParent] : sceneSnapshot.parentMap) {
+        auto childIt = oldToNew.find(oldChild);
+        auto parentIt = oldToNew.find(oldParent);
         
-        // TODO: Implement deserialization
-        clearScene();
-        sceneSnapshot.valid = false;
+        if (childIt != oldToNew.end() && parentIt != oldToNew.end()) {
+            auto* childTransform = ecs->getComponent<Transform>(childIt->second);
+            if (childTransform) {
+                childTransform->parent = parentIt->second;
+            }
+        }
     }
+}
     
     // ==================== Shutdown ====================
     
@@ -988,6 +1061,7 @@ EntityInfo ZeroEngine::getEntityInfo(EntityID id) const {
     info.position = t->position;
     info.scale = t->scale;
     info.rotation = glm::degrees(glm::eulerAngles(t->rotation));
+    info.parent = t->parent;  // Add this
     
     auto* mc = impl->ecs->getComponent<ModelComponent>(id);
     if (mc) { info.hasModel = true; info.modelPath = mc->modelPath; }
@@ -1064,15 +1138,54 @@ EntityID ZeroEngine::getActiveCamera() const {
 PlayState ZeroEngine::getPlayState() const { return impl->playState; }
 
 void ZeroEngine::play() {
+    if (impl->playState == PlayState::Playing) return;
     impl->snapshotScene();
     impl->playState = PlayState::Playing;
 }
 
-void ZeroEngine::pause() { impl->playState = PlayState::Paused; }
-
 void ZeroEngine::stop() {
+    if (impl->playState == PlayState::Editing) return;
     impl->restoreSnapshot();
     impl->playState = PlayState::Editing;
+}
+
+
+
+void ZeroEngine::pause() { impl->playState = PlayState::Paused; }
+
+void ZeroEngine::setEntityName(EntityID id, const std::string& name) {
+    auto* tag = impl->ecs->getComponent<Tag>(id);
+    if (tag) {
+        tag->name = name;
+    } else {
+        impl->ecs->addComponent(id, Tag{name});
+    }
+}
+
+void ZeroEngine::setEntityParent(EntityID id, EntityID parentId) {
+    auto* t = impl->ecs->getComponent<Transform>(id);
+    if (t) t->parent = parentId;
+}
+
+void ZeroEngine::removeEntityParent(EntityID id) {
+    auto* t = impl->ecs->getComponent<Transform>(id);
+    if (t) t->parent = 0;
+}
+
+EntityID ZeroEngine::getEntityParent(EntityID id) const {
+    auto* t = impl->ecs->getComponent<Transform>(id);
+    return t ? t->parent : 0;
+}
+
+std::vector<EntityID> ZeroEngine::getEntityChildren(EntityID id) const {
+    std::vector<EntityID> children;
+    for (EntityID e = 0; e < 10000; e++) {
+        auto* t = impl->ecs->getComponent<Transform>(e);
+        if (t && t->parent == id) {
+            children.push_back(e);
+        }
+    }
+    return children;
 }
 
 void ZeroEngine::setEditorCameraPosition(glm::vec3 pos) { impl->editorCamera.position = pos; }
